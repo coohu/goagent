@@ -22,7 +22,7 @@ import (
 	"github.com/coohu/goagent/internal/memory"
 	"github.com/coohu/goagent/internal/planner"
 	"github.com/coohu/goagent/internal/tools/builtin/file"
-	fileshell "github.com/coohu/goagent/internal/tools/builtin/shell"
+	// fileshell "github.com/coohu/goagent/internal/tools/builtin/shell"
 	"github.com/coohu/goagent/internal/tools/registry"
 )
 
@@ -55,8 +55,8 @@ func run() error {
 	reg.Register(file.NewReadTool())
 	reg.Register(file.NewWriteTool())
 	reg.Register(file.NewListTool())
-	reg.Register(file.NewSearchTool())
-	reg.Register(fileshell.NewExecTool(60*time.Second, "/tmp/goagent"))
+	// reg.Register(file.NewSearchTool())
+	// reg.Register(fileshell.NewExecTool(60*time.Second, "/tmp/goagent"))
 
 	mem := memory.NewInMemoryManager()
 	bus := eventbus.New(eventbus.DefaultConfig())
