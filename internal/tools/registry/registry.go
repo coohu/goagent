@@ -28,7 +28,7 @@ func (r *Registry) Get(name string) (core.Tool, error) {
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", core.Errorf(core.ErrToolNotFound, "tool not found", nil), name)
+		return nil, fmt.Errorf("tool not found: %s", name)
 	}
 	return t, nil
 }
@@ -70,3 +70,5 @@ func (r *Registry) Schemas(names []string) []core.ToolSchema {
 	}
 	return schemas
 }
+
+var _ core.ToolRegistry = (*Registry)(nil)

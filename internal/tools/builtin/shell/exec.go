@@ -3,8 +3,8 @@ package shell
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/coohu/goagent/internal/core"
@@ -13,48 +13,42 @@ import (
 type ExecTool struct {
 	timeout       time.Duration
 	workspaceRoot string
+	shell         string
+	shellArgs     []string
 }
 
 func NewExecTool(timeout time.Duration, workspaceRoot string) *ExecTool {
 	if timeout == 0 {
 		timeout = 60 * time.Second
 	}
-	return &ExecTool{timeout: timeout, workspaceRoot: workspaceRoot}
+
+	shell, args := detectShell()
+
+	return &ExecTool{
+		timeout:       timeout,
+		workspaceRoot: workspaceRoot,
+		shell:         shell,
+		shellArgs:     args,
+	}
+}
+
+func detectShell() (string, []string) {
+	switch runtime.GOOS {
+	case "windows":
+		if _, err := exec.LookPath("powershell"); err == nil {
+			return "powershell", []string{"-Command"}
+		}
+		return "cmd", []string{"/C"}
+	default:
+		return "sh", []string{"-c"}
+	}
 }
 
 func (t *ExecTool) Name() string        { return "shell.exec" }
 func (t *ExecTool) Description() string { return "Execute a shell command and return stdout/stderr" }
 
-func (t *ExecTool) Schema() core.ToolSchema {
-	return core.ToolSchema{
-		Name:        t.Name(),
-		Description: t.Description(),
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"cmd": map[string]any{
-					"type":        "string",
-					"description": "Shell command to execute",
-				},
-				"cwd": map[string]any{
-					"type":        "string",
-					"description": "Working directory (optional)",
-				},
-			},
-			"required": []string{"cmd"},
-		},
-	}
-}
-
-func (t *ExecTool) Validate(input map[string]any) error {
-	if _, ok := input["cmd"].(string); !ok {
-		return fmt.Errorf("cmd is required")
-	}
-	return nil
-}
-
 func (t *ExecTool) Execute(ctx context.Context, input map[string]any) (*core.ToolResult, error) {
-	cmd, _ := input["cmd"].(string)
+	cmdStr, _ := input["cmd"].(string)
 	cwd, _ := input["cwd"].(string)
 	if cwd == "" {
 		cwd = t.workspaceRoot
@@ -64,7 +58,9 @@ func (t *ExecTool) Execute(ctx context.Context, input map[string]any) (*core.Too
 	defer cancel()
 
 	start := time.Now()
-	c := exec.CommandContext(ctx, "sh", "-c", cmd)
+
+	args := append(t.shellArgs, cmdStr)
+	c := exec.CommandContext(ctx, t.shell, args...)
 	c.Dir = cwd
 
 	var stdout, stderr bytes.Buffer
