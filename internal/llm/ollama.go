@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/yourorg/goagent/internal/core"
+	"github.com/coohu/goagent/internal/core"
 )
 
 type OllamaClient struct {

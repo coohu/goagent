@@ -24,7 +24,7 @@ type ExtractedInfo struct {
 }
 
 type ReflectionCtx struct {
-	*core.AgentContext
+	core.AgentContext
 	ToolResult  *core.ToolResult
 	StepName    string
 	ToolName    string

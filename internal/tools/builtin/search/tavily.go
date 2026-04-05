@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourorg/goagent/internal/core"
+	"github.com/coohu/goagent/internal/core"
 )
 
 type TavilyTool struct {
@@ -55,16 +55,16 @@ func (t *TavilyTool) Validate(input map[string]any) error {
 }
 
 type tavilyRequest struct {
-	APIKey         string `json:"api_key"`
-	Query          string `json:"query"`
-	MaxResults     int    `json:"max_results"`
-	IncludeAnswer  bool   `json:"include_answer"`
+	APIKey        string `json:"api_key"`
+	Query         string `json:"query"`
+	MaxResults    int    `json:"max_results"`
+	IncludeAnswer bool   `json:"include_answer"`
 }
 
 type tavilyResult struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Content string `json:"content"`
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	Content string  `json:"content"`
 	Score   float64 `json:"score"`
 }
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yourorg/goagent/internal/core"
+	"github.com/coohu/goagent/internal/core"
 )
 
 type Scene string

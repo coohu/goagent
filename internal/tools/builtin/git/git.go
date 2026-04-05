@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/yourorg/goagent/internal/core"
+	"github.com/coohu/goagent/internal/core"
 )
 
 type CloneTool struct {

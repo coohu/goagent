@@ -10,7 +10,7 @@ import (
 
 type ReflectionResult struct {
 	Success      bool   `json:"success"`
-	Action       string `json:"action"` // continue | retry | replan | abort
+	Action       string `json:"action"`
 	Reason       string `json:"reason"`
 	SuggestedFix string `json:"suggested_fix"`
 }
@@ -22,13 +22,14 @@ func EvaluateToolResultMiddleware() Handler {
 			return next(ctx, data)
 		}
 		if rc.ToolResult != nil && !rc.ToolResult.Success {
+			action := "retry"
+			if rc.RetryCount >= 2 {
+				action = "replan"
+			}
 			rc.Result = &ReflectionResult{
 				Success: false,
-				Action:  "retry",
+				Action:  action,
 				Reason:  fmt.Sprintf("tool %s failed: %s", rc.ToolName, rc.ToolResult.Stderr),
-			}
-			if rc.RetryCount >= 2 {
-				rc.Result.Action = "replan"
 			}
 		}
 		return next(ctx, rc)
@@ -56,10 +57,10 @@ Retry Count: %d
 Evaluate whether this step succeeded relative to the goal.
 Return ONLY valid JSON:
 {
-  "success": true|false,
-  "action": "continue"|"retry"|"replan"|"abort",
+  "success": true,
+  "action": "continue",
   "reason": "brief explanation",
-  "suggested_fix": "only if action is replan"
+  "suggested_fix": ""
 }`, rc.Goal, rc.StepName, rc.ToolName, rawOutput, rc.RetryCount)
 
 		resp, err := llmClient.ChatComplete(ctx, &core.ChatRequest{

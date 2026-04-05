@@ -90,4 +90,4 @@ type FSMEngine interface {
 
 type StateHandler func(ctx context.Context, session *AgentSession, event Event) ([]Event, error)
 
-type Middleware func(ctx context.Context, agentCtx *AgentContext, next func(context.Context, *AgentContext) error) error
+

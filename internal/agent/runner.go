@@ -192,7 +192,7 @@ func (r *Runner) handleUpdateMemory(ctx context.Context, session *core.AgentSess
 
 func (r *Runner) handleReflecting(_ context.Context, session *core.AgentSession, ev core.Event) ([]core.Event, error) {
 	rc := &pipeline.ReflectionCtx{
-		AgentContext: session.AgentCtx,
+		AgentContext: *session.AgentCtx,
 		StepName:     currentStepName(session),
 		ToolName:     fmt.Sprintf("%v", ev.Payload["tool_name"]),
 		RetryCount:   currentStep(session).RetryCount,

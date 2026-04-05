@@ -4,8 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-	"log"
-	"os"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -23,14 +22,6 @@ func RequestID() gin.HandlerFunc {
 }
 
 func Logger() gin.HandlerFunc {
-	file, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-	handler := slog.NewTextHandler(file, nil)
-	slog.SetDefault(slog.New(handler))
-	
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
