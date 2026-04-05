@@ -6,3 +6,11 @@ build/
 *.dylib
 *.test
 *.out
+*.log
+*.tmp
+*.cache
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+.env

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/coohu/goagent/internal/core"
+	"github.com/yourorg/goagent/internal/core"
 )
 
 type Scene string
@@ -15,6 +15,8 @@ const (
 	SceneSummarize Scene = "summarize"
 	SceneReflect   Scene = "reflect"
 )
+
+var _ core.LLMClient = (*Router)(nil)
 
 type Router struct {
 	clients map[string]core.LLMClient
