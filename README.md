@@ -1,8 +1,4 @@
-下面是根据 **go-agent-prd.md** 和 **go-agent-cli-prd.md** 两个文档整合生成的 **Redmi.md**（可以理解为项目说明 / README / 架构说明文档）。
-
----
-
-# Redmi.md — GoAgent 工业级 AI Agent 系统
+# GoAgent 工业级 AI Agent
 
 ## 1. 项目简介
 
