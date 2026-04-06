@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/coohu/goagent/internal/agent"
 	"github.com/coohu/goagent/internal/api/sse"
@@ -48,8 +49,7 @@ func (h *AgentHandler) Run(c *gin.Context) {
 	}
 
 	go func() {
-		ctx := c.Request.Context()
-		_ = h.runner.Run(ctx, session)
+		_ = h.runner.Run(c.Request.Context(), session)
 	}()
 
 	c.JSON(http.StatusOK, RunResponse{
@@ -59,13 +59,67 @@ func (h *AgentHandler) Run(c *gin.Context) {
 	})
 }
 
+func (h *AgentHandler) Continue(c *gin.Context) {
+	session, err := h.sessions.Get(c.Param("session_id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	var req struct {
+		Goal string `json:"goal" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	session.Goal = req.Goal
+	session.AgentCtx.Goal = req.Goal
+	session.Plan = nil
+	session.SetState(core.StateIdle)
+	session.AgentCtx.Scratchpad = &core.Scratchpad{MaxTokens: session.Config.ScratchpadMaxTokens}
+
+	go func() {
+		_ = h.runner.Run(c.Request.Context(), session)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"session_id": session.ID,
+		"state":      session.GetState(),
+		"stream_url": "/api/v1/agent/" + session.ID + "/stream",
+	})
+}
+
 func (h *AgentHandler) Stream(c *gin.Context) {
 	sessionID := c.Param("session_id")
 	if _, err := h.sessions.Get(sessionID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
-	h.hub.ServeClient(c.Writer, c.Request, sessionID)
+	cursor := 0
+	if v := c.Query("cursor"); v != "" {
+		cursor, _ = strconv.Atoi(v)
+	}
+	h.hub.ServeClient(c.Writer, c.Request, sessionID, cursor)
+}
+
+func (h *AgentHandler) Events(c *gin.Context) {
+	sessionID := c.Param("session_id")
+	if _, err := h.sessions.Get(sessionID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	cursor := 0
+	if v := c.Query("cursor"); v != "" {
+		cursor, _ = strconv.Atoi(v)
+	}
+	events := h.hub.History(sessionID, cursor)
+	raw := make([]any, len(events))
+	for i, e := range events {
+		raw[i] = string(e)
+	}
+	c.JSON(http.StatusOK, gin.H{"events": raw, "cursor": cursor + len(events)})
 }
 
 func (h *AgentHandler) Status(c *gin.Context) {
@@ -74,20 +128,15 @@ func (h *AgentHandler) Status(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
-
-	var planInfo any
-	if session.Plan != nil {
-		planInfo = session.Plan
-	}
-
 	c.JSON(http.StatusOK, gin.H{
-		"session_id": session.ID,
-		"state":      session.GetState(),
-		"goal":       session.Goal,
-		"plan":       planInfo,
-		"metrics":    session.Metrics,
-		"created_at": session.CreatedAt,
-		"updated_at": session.UpdatedAt,
+		"session_id":  session.ID,
+		"state":       session.GetState(),
+		"goal":        session.Goal,
+		"plan":        session.Plan,
+		"metrics":     session.Metrics,
+		"created_at":  session.CreatedAt,
+		"updated_at":  session.UpdatedAt,
+		"finished_at": session.FinishedAt,
 	})
 }
 
@@ -115,18 +164,74 @@ func (h *AgentHandler) Approve(c *gin.Context) {
 		return
 	}
 
+	evType := core.EventCancel
 	if body.Approved {
-		session.EventChan <- core.Event{
-			Type:      core.EventApproved,
-			SessionID: session.ID,
-			Payload:   map[string]any{"comment": body.Comment},
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "resumed"})
-	} else {
-		session.EventChan <- core.Event{
-			Type:      core.EventCancel,
-			SessionID: session.ID,
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
+		evType = core.EventApproved
 	}
+	session.EventChan <- core.Event{
+		Type:      evType,
+		SessionID: session.ID,
+		Payload:   map[string]any{"comment": body.Comment},
+	}
+
+	status := "cancelled"
+	if body.Approved {
+		status = "resumed"
+	}
+	c.JSON(http.StatusOK, gin.H{"status": status})
+}
+
+func (h *AgentHandler) UpdateConfig(c *gin.Context) {
+	session, err := h.sessions.Get(c.Param("session_id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	var patch struct {
+		MaxSteps      *int     `json:"max_steps"`
+		MaxRuntime    *string  `json:"max_runtime"`
+		PlannerModel  *string  `json:"planner_model"`
+		ExecutorModel *string  `json:"executor_model"`
+		AllowedTools  []string `json:"allowed_tools"`
+	}
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if patch.MaxSteps != nil {
+		session.Config.MaxSteps = *patch.MaxSteps
+	}
+	if patch.PlannerModel != nil {
+		session.Config.PlannerModel = *patch.PlannerModel
+	}
+	if patch.ExecutorModel != nil {
+		session.Config.ExecutorModel = *patch.ExecutorModel
+	}
+	if patch.AllowedTools != nil {
+		session.Config.AllowedTools = patch.AllowedTools
+	}
+
+	c.JSON(http.StatusOK, gin.H{"config": session.Config})
+}
+
+func (h *AgentHandler) ListSessions(c *gin.Context) {
+	all := h.sessions.List()
+	type item struct {
+		ID        string `json:"id"`
+		Goal      string `json:"goal"`
+		State     string `json:"state"`
+		CreatedAt any    `json:"created_at"`
+	}
+	result := make([]item, len(all))
+	for i, s := range all {
+		result[i] = item{
+			ID:        s.ID,
+			Goal:      s.Goal,
+			State:     string(s.GetState()),
+			CreatedAt: s.CreatedAt,
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"sessions": result})
 }

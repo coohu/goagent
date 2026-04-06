@@ -5,35 +5,49 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
+type SSEEvent struct {
+	Type      string         `json:"type"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	Timestamp time.Time      `json:"ts"`
+}
+
 type Client struct {
-	ch chan []byte
+	ch     chan []byte
+	cursor int
 }
 
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[string][]*Client
+	history map[string][][]byte
+	maxHist int
 }
 
 func NewHub() *Hub {
-	return &Hub{clients: make(map[string][]*Client)}
+	return &Hub{
+		clients: make(map[string][]*Client),
+		history: make(map[string][][]byte),
+		maxHist: 500,
+	}
 }
 
-func (h *Hub) Register(sessionID string) *Client {
-	c := &Client{ch: make(chan []byte, 256)}
+func (h *Hub) Register(sessionID string, fromCursor int) *Client {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := &Client{ch: make(chan []byte, 512), cursor: fromCursor}
 	h.clients[sessionID] = append(h.clients[sessionID], c)
-	h.mu.Unlock()
 	return c
 }
 
 func (h *Hub) Unregister(sessionID string, c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	clients := h.clients[sessionID]
-	filtered := clients[:0]
-	for _, cl := range clients {
+	list := h.clients[sessionID]
+	filtered := list[:0]
+	for _, cl := range list {
 		if cl != c {
 			filtered = append(filtered, cl)
 		}
@@ -47,9 +61,16 @@ func (h *Hub) Broadcast(sessionID string, event any) {
 	if err != nil {
 		return
 	}
-	h.mu.RLock()
+	h.mu.Lock()
+	hist := h.history[sessionID]
+	hist = append(hist, data)
+	if len(hist) > h.maxHist {
+		hist = hist[len(hist)-h.maxHist:]
+	}
+	h.history[sessionID] = hist
 	clients := h.clients[sessionID]
-	h.mu.RUnlock()
+	h.mu.Unlock()
+
 	for _, c := range clients {
 		select {
 		case c.ch <- data:
@@ -58,7 +79,28 @@ func (h *Hub) Broadcast(sessionID string, event any) {
 	}
 }
 
-func (h *Hub) ServeClient(w http.ResponseWriter, r *http.Request, sessionID string) {
+func (h *Hub) History(sessionID string, fromCursor int) [][]byte {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	hist := h.history[sessionID]
+	if fromCursor >= len(hist) {
+		return nil
+	}
+	if fromCursor < 0 {
+		fromCursor = 0
+	}
+	out := make([][]byte, len(hist)-fromCursor)
+	copy(out, hist[fromCursor:])
+	return out
+}
+
+func (h *Hub) ClearHistory(sessionID string) {
+	h.mu.Lock()
+	delete(h.history, sessionID)
+	h.mu.Unlock()
+}
+
+func (h *Hub) ServeClient(w http.ResponseWriter, r *http.Request, sessionID string, fromCursor int) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -70,7 +112,12 @@ func (h *Hub) ServeClient(w http.ResponseWriter, r *http.Request, sessionID stri
 		return
 	}
 
-	client := h.Register(sessionID)
+	for _, past := range h.History(sessionID, fromCursor) {
+		fmt.Fprintf(w, "data: %s\n\n", past)
+	}
+	flusher.Flush()
+
+	client := h.Register(sessionID, fromCursor)
 	defer h.Unregister(sessionID, client)
 
 	for {
