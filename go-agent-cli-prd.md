@@ -44,11 +44,25 @@ GoAgent CLI 是 GoAgent 系统的官方终端客户端。它不仅是一个 API 
 
 ## 3. 功能需求
 
-### 3.1 核心对话与多轮交互
+### 3.1 核心对话与常用快捷指令 (Slash Commands)
 - **Session 保持**: 客户端首次启动即初始化一个 Session ID，之后的所有输入（Goal）均在此 Session 下进行追加，确保 Agent 拥有完整的历史记忆。
 - **流式实时反馈**: 持续监听 SSE 流，动态渲染 Agent 的思考、工具调用及最终回复。
 - **对话框持久化**: 模仿现代 AI 聊天界面，不论 Agent 是否处于执行态，用户输入框始终保持可输入，实现异步交互。
 - **任务中断**: 优雅处理 `Ctrl+C`，不仅停止 CLI 端的等待，同时向 Server 发送 `DELETE` 请求停止远程任务。
+
+#### 3.1.1 内置 Slash Commands
+借鉴主流 AI Agent (如 Cursor, Claude Code) 的设计，CLI 必须支持以下快捷指令：
+
+| 指令 | 说明 | 示例 |
+| :--- | :--- | :--- |
+| `/model` | 查看或切换当前使用的 LLM 模型 | `/model gpt-4o`, `/model qwen-plus` |
+| `/clear` | 清空当前对话上下文（不删除 Session，但重置推理链） | `/clear` |
+| `/session` | 切换或新建用户会话 Session | `/session new`, `/session list`, `/session sess_123` |
+| `/help` | 显示所有可用指令及其描述 | `/help` |
+| `/exit` | 退出 CLI 客户端（可选择是否同步关闭服务端进程） | `/exit` |
+| `/upload` | 上传本地文件到 Agent 的工作目录 | `/upload ./data.csv` |
+| `/download`| 下载远程工作目录的文件到本地 | `/download ./output.png` |
+| `/config` | 查看或临时修改 Agent 运行配置 (如 max_steps) | `/config max_steps 50` |
 
 ### 3.2 模式切换与服务管理
 - **自动启动**: 如果配置为本地模式且 `8080` 端口未响应，CLI 应尝试启动本地 `go-agent` 服务进程。
@@ -81,7 +95,8 @@ GoAgent CLI 是 GoAgent 系统的官方终端客户端。它不仅是一个 API 
 ## 4. 技术架构
 
 ### 4.1 模块划分
-- **TUI Engine**: 基于 `bubbletea` 的 UI 渲染循环。
+- **TUI Engine**: 基于 `bubbletea` 的 UI 渲染循环，负责所有视觉组件的排版和响应。
+- **Command Parser**: 解析用户输入的 Slash Commands，并将对应的业务逻辑分发到 API Client 或本地处理器。
 - **API Client**: 封装与 GoAgent Server 的通信逻辑（REST + SSE）。
 - **Daemon Manager**: 负责本地 `go-agent` 服务器的启动、保活和健康检查。
 - **File Sync Engine**: 处理本地与服务端的文件传输。
@@ -104,7 +119,9 @@ GoAgent CLI 是 GoAgent 系统的官方终端客户端。它不仅是一个 API 
 | **文件获取** | `GET /api/v1/files/download` | 获取 Agent 生成的文件内容 | P0 |
 | **上下文延续** | `POST /api/v1/agent/:id/continue` | 在现有 Session 中发送新指令（避免每次 run 都是新 Session） | P1 |
 | **事件回溯** | `GET /api/v1/agent/:id/events` | 获取该 Session 的历史事件流（用于 CLI 断线重连后恢复 UI） | P2 |
-| **工具白名单配置** | `PUT /api/v1/agent/:id/config` | 运行时动态调整允许执行的工具列表 | P2 |
+| **工具白名单配置** | `PUT /api/v1/agent/:id/config` | 运行时动态调整允许执行的工具列表或切换模型 | P2 |
+| **会话管理** | `GET /api/v1/sessions` | 获取所有活跃/历史 Session 列表 | P1 |
+| **能力发现** | `GET /api/v1/models` | 获取服务端支持的所有模型列表 | P1 |
 
 ---
 
