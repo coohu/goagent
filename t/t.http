@@ -8,4 +8,4 @@ Content-Type: application/json
 ###
 GET http://localhost:8080/health
 ###
-GET http://localhost:8080/api/v1/agent/4e5739f8-8e35-4291-bb86-1568965a627c/stream
+GET http://localhost:8080/api/v1/agent/a97bd07d-11e8-4edf-863e-b14305ae0e6c/stream

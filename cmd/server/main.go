@@ -9,24 +9,25 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/coohu/goagent/internal/agent"
-	"github.com/coohu/goagent/internal/api"
-	"github.com/coohu/goagent/internal/api/handler"
-	"github.com/coohu/goagent/internal/api/sse"
-	"github.com/coohu/goagent/internal/core"
-	"github.com/coohu/goagent/internal/eventbus"
-	"github.com/coohu/goagent/internal/executor"
+	"github.com/joho/godotenv"
 	"github.com/coohu/goagent/internal/fsm"
 	"github.com/coohu/goagent/internal/llm"
+	"github.com/coohu/goagent/internal/api"
+	"github.com/coohu/goagent/internal/core"
+	"github.com/coohu/goagent/internal/agent"
 	"github.com/coohu/goagent/internal/memory"
+	"github.com/coohu/goagent/internal/api/sse"
 	"github.com/coohu/goagent/internal/planner"
+	"github.com/coohu/goagent/internal/eventbus"
+	"github.com/coohu/goagent/internal/executor"
+	"github.com/coohu/goagent/internal/api/handler"
+	"github.com/coohu/goagent/internal/tools/registry"
 	"github.com/coohu/goagent/internal/tools/builtin/file"
 	fileshell "github.com/coohu/goagent/internal/tools/builtin/shell"
-	"github.com/coohu/goagent/internal/tools/registry"
 )
 
 func main() {
+	godotenv.Load()
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
 		os.Exit(1)
@@ -38,16 +39,15 @@ func run() error {
 	if apiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY not set")
 	}
-
+	baseURL := os.Getenv("OPENAI_BASE_URL")
 	llmClients := map[string]core.LLMClient{
-		"gpt-4o":      llm.NewOpenAIClient(apiKey, "", "gpt-4o"),
-		"gpt-4o-mini": llm.NewOpenAIClient(apiKey, "", "gpt-4o-mini"),
+		"qwen/qwen3.6-plus:free": llm.NewOpenAIClient(apiKey, baseURL, "qwen/qwen3.6-plus:free"),
 	}
 	scenes := map[llm.Scene]string{
-		llm.ScenePlanning:  "gpt-4o",
-		llm.SceneExecute:   "gpt-4o",
-		llm.SceneSummarize: "gpt-4o-mini",
-		llm.SceneReflect:   "gpt-4o-mini",
+		llm.ScenePlanning:  "qwen/qwen3.6-plus:free",
+		llm.SceneExecute:   "qwen/qwen3.6-plus:free",
+		llm.SceneSummarize: "qwen/qwen3.6-plus:free",
+		llm.SceneReflect:   "qwen/qwen3.6-plus:free",
 	}
 	llmRouter := llm.NewRouter(llmClients, scenes)
 
