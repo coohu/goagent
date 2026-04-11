@@ -15,12 +15,12 @@ agent:
   worker_pool_size: 20
 
 llm:
-  default_model: "qwen/qwen3.6-plus:free"
-  summarizer_model: "qwen/qwen3.6-plus:free"
-  reflection_model: "qwen/qwen3.6-plus:free"
+  default_model: "gpt-4o"
+  summarizer_model: "gpt-4o-mini"
+  reflection_model: "gpt-4o-mini"
   openai:
     api_key: "${OPENAI_API_KEY}"
-    base_url: "https://openrouter.ai/api/v1"
+    base_url: "https://api.openai.com/v1"
     timeout: "120s"
   ollama:
     base_url: "http://localhost:11434"
