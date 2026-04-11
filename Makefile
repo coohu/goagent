@@ -1,10 +1,19 @@
-.PHONY: build run test lint fmt wire mock migrate-up migrate-down dev docker-build build-sandbox
+.PHONY: build build-server build-cli run run-cli test lint fmt \
+        migrate-up migrate-down dev docker-build build-sandbox
 
-build:
-	go build -o bin/goagent ./cmd/server
+build: build-server build-cli
+
+build-server:
+	go build -o bin/goagent-server ./cmd/server
+
+build-cli:
+	go build -o bin/goagent ./cmd/cli
 
 run:
 	go run ./cmd/server
+
+run-cli:
+	go run ./cmd/cli
 
 test:
 	go test ./... -v -race -coverprofile=coverage.out

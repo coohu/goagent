@@ -4,13 +4,12 @@ import (
 	"net/http"
 
 	"github.com/coohu/goagent/internal/core"
-	"github.com/coohu/goagent/internal/tools/registry"
 	"github.com/gin-gonic/gin"
 )
 
 type SystemHandler struct {
-	registry     *registry.Registry
-	knownModels  []ModelInfo
+	registry    core.ToolRegistry
+	knownModels []ModelInfo
 }
 
 type ModelInfo struct {
@@ -19,7 +18,7 @@ type ModelInfo struct {
 	Default  bool   `json:"default"`
 }
 
-func NewSystemHandler(reg *registry.Registry, defaultModel string, models []ModelInfo) *SystemHandler {
+func NewSystemHandler(reg core.ToolRegistry, defaultModel string, models []ModelInfo) *SystemHandler {
 	for i := range models {
 		if models[i].ID == defaultModel {
 			models[i].Default = true
@@ -35,8 +34,8 @@ func (h *SystemHandler) ListModels(c *gin.Context) {
 func (h *SystemHandler) ListTools(c *gin.Context) {
 	tools := h.registry.List()
 	type toolInfo struct {
-		Name        string         `json:"name"`
-		Description string         `json:"description"`
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
 		Schema      core.ToolSchema `json:"schema"`
 	}
 	result := make([]toolInfo, len(tools))

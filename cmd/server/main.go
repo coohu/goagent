@@ -24,9 +24,16 @@ import (
 	"github.com/coohu/goagent/internal/tools/builtin/file"
 	fileshell "github.com/coohu/goagent/internal/tools/builtin/shell"
 	"github.com/coohu/goagent/internal/tools/registry"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		slog.Error("Warning: 没有找到 .env 文件")
+	} else {
+		slog.Error("成功加载 .env 文件")
+	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
 		os.Exit(1)
@@ -40,16 +47,22 @@ func run() error {
 	}
 
 	workspaceRoot := envOr("WORKSPACE_ROOT", "/tmp/goagent/workspaces")
-
+	baseUrl := envOr("BASE_URL", "https://openrouter.ai/api/v1")
+	planModel := envOr("PLAN_MODEL", "gpt-4o")
+	execModel := envOr("EXEC_MODEL", "gpt-4o")
+	summarizeModel := envOr("SUMMARIZE_MODEL", "gpt-4o-mini")
+	reflectModel := envOr("REFLECT_MODEL", "gpt-4o-mini")
 	llmClients := map[string]core.LLMClient{
-		"gpt-4o":      llm.NewOpenAIClient(apiKey, "", "gpt-4o"),
-		"gpt-4o-mini": llm.NewOpenAIClient(apiKey, "", "gpt-4o-mini"),
+		planModel:      llm.NewOpenAIClient(apiKey, baseUrl, planModel),
+		execModel:      llm.NewOpenAIClient(apiKey, baseUrl, execModel),
+		summarizeModel: llm.NewOpenAIClient(apiKey, baseUrl, summarizeModel),
+		reflectModel: llm.NewOpenAIClient(apiKey, baseUrl, reflectModel),
 	}
 	scenes := map[llm.Scene]string{
-		llm.ScenePlanning:  "gpt-4o",
-		llm.SceneExecute:   "gpt-4o",
-		llm.SceneSummarize: "gpt-4o-mini",
-		llm.SceneReflect:   "gpt-4o-mini",
+		llm.ScenePlanning:  planModel,
+		llm.SceneExecute:   execModel,
+		llm.SceneSummarize: summarizeModel,
+		llm.SceneReflect:   reflectModel,
 	}
 	llmRouter := llm.NewRouter(llmClients, scenes)
 

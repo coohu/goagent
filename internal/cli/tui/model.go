@@ -26,10 +26,10 @@ var (
 	styleError    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	styleSystem   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	styleStatus   = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252")).Padding(0, 1)
-	styleApproval = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("11")).Padding(0, 1)
+	styleApproval = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("11")).Padding(1, 2)
 )
 
-// ── Message types (bubbletea Msg) ────────────────────────────────
+// ── Msg types ────────────────────────────────────────────────────
 
 type sseEventMsg apiclient.SSEEvent
 type errMsg struct{ err error }
@@ -39,9 +39,8 @@ type approvalRequestMsg struct {
 	Risk  string
 }
 type sessionStartedMsg struct{ sessionID string }
-type tickMsg time.Time
 
-// ── Entry in the conversation stream ────────────────────────────
+// ── Conversation entry ────────────────────────────────────────────
 
 type entryKind int
 
@@ -57,34 +56,33 @@ type entry struct {
 	kind    entryKind
 	text    string
 	success *bool
-	raw     string
 	ts      time.Time
 }
 
-// ── Model ────────────────────────────────────────────────────────
+// ── Model ─────────────────────────────────────────────────────────
 
 type Model struct {
-	client   *apiclient.Client
-	appState *state.State
-	ctx      context.Context
-	cancel   context.CancelFunc
+	client     *apiclient.Client
+	appState   *state.State
+	ctx        context.Context
+	cancel     context.CancelFunc
+	sseChannel <-chan apiclient.SSEEvent
 
 	entries    []entry
 	viewport   viewport.Model
 	input      textarea.Model
 	spinner    spinner.Model
-	sseChannel <-chan apiclient.SSEEvent
+	inputQueue []string
 
 	width, height int
 	agentRunning  bool
 	approval      *approvalRequestMsg
 	statusMsg     string
-	inputQueue    []string
 }
 
 func New(client *apiclient.Client, appState *state.State) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Message GoAgent... (Enter to send, Shift+Enter for newline)"
+	ta.Placeholder = "Message GoAgent...  (/help for commands, Shift+Enter for newline)"
 	ta.Focus()
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
@@ -94,8 +92,6 @@ func New(client *apiclient.Client, appState *state.State) *Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 
-	vp := viewport.New(80, 20)
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Model{
@@ -103,21 +99,19 @@ func New(client *apiclient.Client, appState *state.State) *Model {
 		appState: appState,
 		ctx:      ctx,
 		cancel:   cancel,
-		viewport: vp,
+		viewport: viewport.New(80, 20),
 		input:    ta,
 		spinner:  sp,
 	}
-	m.pushSystem("GoAgent CLI ready. Type your goal or /help for commands.")
+	m.pushSystem("GoAgent CLI  —  type your goal or /help for commands.")
 	return m
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
-		textarea.Blink,
-		m.spinner.Tick,
-		tea.EnterAltScreen,
-	)
+	return tea.Batch(textarea.Blink, m.spinner.Tick, tea.EnterAltScreen)
 }
+
+// ── Update ────────────────────────────────────────────────────────
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -128,27 +122,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height - 7
+		m.viewport.Height = msg.Height - 6
 		m.input.SetWidth(msg.Width - 2)
 
 	case tea.KeyMsg:
 		if m.approval != nil {
-			return m.handleApprovalKey(msg, &cmds)
+			return m.handleApprovalKey(msg)
 		}
 		switch msg.String() {
 		case "ctrl+c":
-			cmds = append(cmds, m.handleCtrlC())
-			return m, tea.Batch(cmds...)
+			return m, m.handleCtrlC()
 		case "enter":
-			text := strings.TrimSpace(m.input.Value())
-			m.input.Reset()
-			if text != "" {
+			if text := strings.TrimSpace(m.input.Value()); text != "" {
+				m.input.Reset()
 				cmds = append(cmds, m.handleInput(text))
 			}
 		}
 
 	case sseEventMsg:
-		cmds = append(cmds, m.handleSSEEvent(apiclient.SSEEvent(msg)))
+		if cmd := m.handleSSEEvent(apiclient.SSEEvent(msg)); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if m.sseChannel != nil {
+			cmds = append(cmds, WaitForSSE(m.sseChannel))
+		}
 
 	case approvalRequestMsg:
 		m.approval = &msg
@@ -156,9 +153,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionStartedMsg:
 		m.appState.SessionID = msg.sessionID
 		_ = m.appState.Save()
+		if m.sseChannel != nil {
+			cmds = append(cmds, WaitForSSE(m.sseChannel))
+		}
 
 	case errMsg:
-		m.pushSystem("Error: " + msg.err.Error())
+		m.pushSystem("❌ " + msg.err.Error())
 		m.agentRunning = false
 
 	case spinner.TickMsg:
@@ -178,9 +178,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// ── View ──────────────────────────────────────────────────────────
+
 func (m *Model) View() string {
 	if m.approval != nil {
-		return m.renderApproval()
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderApproval())
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.viewport.View(),
@@ -189,21 +191,19 @@ func (m *Model) View() string {
 	)
 }
 
-// ── Handlers ────────────────────────────────────────────────────
+// ── Input dispatch ────────────────────────────────────────────────
 
 func (m *Model) handleInput(text string) tea.Cmd {
 	cmd := cmdparser.Parse(text)
-
 	if cmd.Kind == cmdparser.KindGoal {
 		m.pushEntry(entry{kind: entryUser, text: text, ts: time.Now()})
 		if m.agentRunning {
 			m.inputQueue = append(m.inputQueue, text)
-			m.pushSystem("Queued (agent is running)")
+			m.pushSystem("Queued — agent is running.")
 			return nil
 		}
 		return m.sendGoal(text)
 	}
-
 	return m.handleSlash(cmd)
 }
 
@@ -218,7 +218,9 @@ func (m *Model) handleSlash(cmd cmdparser.Command) tea.Cmd {
 		m.entries = nil
 		m.appState.ClearSession()
 		_ = m.appState.Save()
-		m.pushSystem("Context cleared. New session will start on next message.")
+		m.sseChannel = nil
+		m.agentRunning = false
+		m.pushSystem("Context cleared.")
 	case "session":
 		return m.handleSessionCmd(cmd.Args)
 	case "model":
@@ -230,87 +232,109 @@ func (m *Model) handleSlash(cmd cmdparser.Command) tea.Cmd {
 	case "config":
 		return m.handleConfig(cmd.Args)
 	default:
-		m.pushSystem(fmt.Sprintf("Unknown command: /%s — type /help", cmd.Slash))
+		m.pushSystem(fmt.Sprintf("Unknown command /%s — type /help", cmd.Slash))
 	}
 	return nil
 }
 
 func (m *Model) handleCtrlC() tea.Cmd {
 	if m.agentRunning && m.appState.SessionID != "" {
-		go m.client.Cancel(m.ctx, m.appState.SessionID)
-		m.pushSystem("Cancelling task...")
+		sessionID := m.appState.SessionID
 		m.agentRunning = false
-		return nil
+		m.pushSystem("Cancelling...")
+		return func() tea.Msg {
+			_ = m.client.Cancel(m.ctx, sessionID)
+			return nil
+		}
 	}
 	m.cancel()
 	return tea.Quit
 }
 
-func (m *Model) handleApprovalKey(msg tea.KeyMsg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch strings.ToLower(msg.String()) {
 	case "y", "enter":
-		go m.client.Approve(m.ctx, m.appState.SessionID, true, "")
+		sessionID := m.appState.SessionID
+		m.approval = nil
 		m.pushSystem("✅ Approved")
+		return m, func() tea.Msg {
+			_ = m.client.Approve(m.ctx, sessionID, true, "")
+			return nil
+		}
+	case "n", "q", "escape":
+		sessionID := m.appState.SessionID
 		m.approval = nil
-	case "n":
-		go m.client.Approve(m.ctx, m.appState.SessionID, false, "")
 		m.pushSystem("❌ Rejected")
-		m.approval = nil
+		return m, func() tea.Msg {
+			_ = m.client.Approve(m.ctx, sessionID, false, "")
+			return nil
+		}
 	}
-	return m, tea.Batch(*cmds...)
+	return m, nil
 }
+
+// ── SSE event handler ─────────────────────────────────────────────
 
 func (m *Model) handleSSEEvent(ev apiclient.SSEEvent) tea.Cmd {
 	switch ev.Type {
 	case "thought":
-		if content, ok := ev.Payload["content"].(string); ok {
-			m.pushEntry(entry{kind: entryThought, text: content, ts: time.Now()})
+		if v, ok := ev.Payload["content"].(string); ok && v != "" {
+			m.pushEntry(entry{kind: entryThought, text: v, ts: time.Now()})
 		}
+
 	case "tool_call":
 		tool, _ := ev.Payload["tool"].(string)
 		input, _ := ev.Payload["input"].(string)
-		m.pushEntry(entry{kind: entryToolCall, text: fmt.Sprintf("[%s] %s", tool, input), ts: time.Now()})
+		m.pushEntry(entry{kind: entryToolCall, text: fmt.Sprintf("[%s]  %s", tool, input), ts: time.Now()})
+
 	case "tool_result":
 		ok, _ := ev.Payload["success"].(bool)
 		summary, _ := ev.Payload["summary"].(string)
-		raw, _ := ev.Payload["content"].(string)
-		t := true
-		f := false
-		suc := &t
-		if !ok {
-			suc = &f
+		if summary == "" {
+			summary, _ = ev.Payload["content"].(string)
 		}
-		m.pushEntry(entry{kind: entryToolResult, text: summary, success: suc, raw: raw, ts: time.Now()})
-	case "step_done":
-		// handled by tool_result above
+		suc := ok
+		m.pushEntry(entry{kind: entryToolResult, text: summary, success: &suc, ts: time.Now()})
+
+	case "state_change":
+		if v, ok := ev.Payload["to"].(string); ok {
+			m.statusMsg = v
+		}
+
 	case "done":
 		result, _ := ev.Payload["result"].(string)
-		m.pushEntry(entry{kind: entrySystem, text: "✅ Done: " + result, ts: time.Now()})
+		m.pushSystem("✅ " + result)
 		m.agentRunning = false
+		m.sseChannel = nil
 		if len(m.inputQueue) > 0 {
 			next := m.inputQueue[0]
 			m.inputQueue = m.inputQueue[1:]
+			m.pushEntry(entry{kind: entryUser, text: next, ts: time.Now()})
 			return m.sendGoal(next)
 		}
+
 	case "error":
 		reason, _ := ev.Payload["reason"].(string)
-		m.pushEntry(entry{kind: entrySystem, text: "❌ Error: " + reason, ts: time.Now()})
+		m.pushSystem("❌ " + reason)
 		m.agentRunning = false
+		m.sseChannel = nil
+
 	case "approval_required":
 		tool, _ := ev.Payload["tool"].(string)
-		var input map[string]any
-		if v, ok := ev.Payload["input"].(map[string]any); ok {
-			input = v
-		}
+		input, _ := ev.Payload["input"].(map[string]any)
 		return func() tea.Msg {
 			return approvalRequestMsg{Tool: tool, Input: input, Risk: "high"}
 		}
-	case "state_change":
-		to, _ := ev.Payload["to"].(string)
-		m.statusMsg = to
+
+	case "__system__":
+		if v, ok := ev.Payload["text"].(string); ok {
+			m.pushSystem(v)
+		}
 	}
 	return nil
 }
+
+// ── Goal submission ───────────────────────────────────────────────
 
 func (m *Model) sendGoal(goal string) tea.Cmd {
 	m.agentRunning = true
@@ -324,15 +348,15 @@ func (m *Model) sendGoal(goal string) tea.Cmd {
 			}
 		}
 		if sessionID == "" {
-			resp, err := m.client.Run(ctx, goal, nil)
+			resp, err := m.client.Run(ctx, goal, map[string]any{
+				"planner_model":  m.appState.Model,
+				"executor_model": m.appState.Model,
+			})
 			if err != nil {
 				return errMsg{err}
 			}
 			sessionID = resp.SessionID
 		}
-
-		m.appState.SessionID = sessionID
-		_ = m.appState.Save()
 
 		evCh := make(chan apiclient.SSEEvent, 128)
 		go func() {
@@ -345,7 +369,7 @@ func (m *Model) sendGoal(goal string) tea.Cmd {
 	}
 }
 
-// ── Slash sub-handlers ──────────────────────────────────────────
+// ── Slash sub-commands ────────────────────────────────────────────
 
 func (m *Model) handleSessionCmd(args []string) tea.Cmd {
 	if len(args) == 0 {
@@ -356,6 +380,8 @@ func (m *Model) handleSessionCmd(args []string) tea.Cmd {
 	case "new":
 		m.appState.ClearSession()
 		_ = m.appState.Save()
+		m.sseChannel = nil
+		m.agentRunning = false
 		m.pushSystem("New session will start on next message.")
 	case "list":
 		return func() tea.Msg {
@@ -364,8 +390,15 @@ func (m *Model) handleSessionCmd(args []string) tea.Cmd {
 				return errMsg{err}
 			}
 			var sb strings.Builder
+			if len(sessions) == 0 {
+				sb.WriteString("  (no sessions)")
+			}
 			for _, s := range sessions {
-				sb.WriteString(fmt.Sprintf("  %s  [%s]  %s\n", s.ID[:8], s.State, s.Goal))
+				id := s.ID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				sb.WriteString(fmt.Sprintf("  %s  %-12s  %s\n", id, "["+s.State+"]", s.Goal))
 			}
 			return sseEventMsg{Type: "__system__", Payload: map[string]any{"text": sb.String()}}
 		}
@@ -379,33 +412,46 @@ func (m *Model) handleSessionCmd(args []string) tea.Cmd {
 
 func (m *Model) handleModelCmd(args []string) tea.Cmd {
 	if len(args) == 0 {
-		m.pushSystem("Current model: " + m.appState.Model)
-		return nil
+		return func() tea.Msg {
+			models, err := m.client.ListModels(m.ctx)
+			if err != nil {
+				return errMsg{err}
+			}
+			var sb strings.Builder
+			for _, mod := range models {
+				mark := "  "
+				if mod.ID == m.appState.Model {
+					mark = "→ "
+				}
+				sb.WriteString(fmt.Sprintf("%s%s  (%s)\n", mark, mod.ID, mod.Provider))
+			}
+			return sseEventMsg{Type: "__system__", Payload: map[string]any{"text": sb.String()}}
+		}
 	}
 	m.appState.Model = args[0]
 	_ = m.appState.Save()
 	if m.appState.SessionID != "" {
 		go m.client.UpdateConfig(m.ctx, m.appState.SessionID, map[string]any{
-			"planner_model":  args[0],
-			"executor_model": args[0],
+			"planner_model": args[0], "executor_model": args[0],
 		})
 	}
-	m.pushSystem("Model set to: " + args[0])
+	m.pushSystem("Model → " + args[0])
 	return nil
 }
 
 func (m *Model) handleUpload(args []string) tea.Cmd {
 	if len(args) == 0 {
-		m.pushSystem("Usage: /upload <local-path>")
+		m.pushSystem("Usage: /upload <local-path> [...]")
 		return nil
 	}
 	if m.appState.SessionID == "" {
-		m.pushSystem("No active session. Send a message first.")
+		m.pushSystem("No active session. Send a goal first.")
 		return nil
 	}
 	paths := args
+	sessionID := m.appState.SessionID
 	return func() tea.Msg {
-		result, err := m.client.Upload(m.ctx, m.appState.SessionID, paths)
+		result, err := m.client.Upload(m.ctx, sessionID, paths)
 		if err != nil {
 			return errMsg{err}
 		}
@@ -428,12 +474,13 @@ func (m *Model) handleDownload(args []string) tea.Cmd {
 		m.pushSystem("No active session.")
 		return nil
 	}
+	sessionID := m.appState.SessionID
 	return func() tea.Msg {
-		if err := m.client.Download(m.ctx, m.appState.SessionID, remote, local); err != nil {
+		if err := m.client.Download(m.ctx, sessionID, remote, local); err != nil {
 			return errMsg{err}
 		}
 		return sseEventMsg{Type: "__system__",
-			Payload: map[string]any{"text": "Downloaded to: " + local}}
+			Payload: map[string]any{"text": "Downloaded → " + local}}
 	}
 }
 
@@ -447,16 +494,17 @@ func (m *Model) handleConfig(args []string) tea.Cmd {
 		return nil
 	}
 	key, val := args[0], args[1]
+	sessionID := m.appState.SessionID
 	return func() tea.Msg {
-		if err := m.client.UpdateConfig(m.ctx, m.appState.SessionID, map[string]any{key: val}); err != nil {
+		if err := m.client.UpdateConfig(m.ctx, sessionID, map[string]any{key: val}); err != nil {
 			return errMsg{err}
 		}
 		return sseEventMsg{Type: "__system__",
-			Payload: map[string]any{"text": fmt.Sprintf("Config updated: %s = %s", key, val)}}
+			Payload: map[string]any{"text": fmt.Sprintf("Config: %s = %s", key, val)}}
 	}
 }
 
-// ── Rendering ───────────────────────────────────────────────────
+// ── Rendering ─────────────────────────────────────────────────────
 
 func (m *Model) renderEntries() string {
 	var sb strings.Builder
@@ -467,17 +515,15 @@ func (m *Model) renderEntries() string {
 		case entryThought:
 			sb.WriteString(styleThought.Render("  ↳ "+e.text) + "\n")
 		case entryToolCall:
-			sb.WriteString(styleToolCall.Render("  ⚙ "+e.text) + "\n")
+			sb.WriteString(styleToolCall.Render("  ⚙  "+e.text) + "\n")
 		case entryToolResult:
-			icon := "✅"
-			style := styleSuccess
+			icon, style := "✅", styleSuccess
 			if e.success != nil && !*e.success {
-				icon = "❌"
-				style = styleError
+				icon, style = "❌", styleError
 			}
-			sb.WriteString(style.Render("  "+icon+" "+e.text) + "\n\n")
+			sb.WriteString(style.Render("  "+icon+"  "+e.text) + "\n\n")
 		case entrySystem:
-			sb.WriteString(styleSystem.Render("  "+e.text) + "\n\n")
+			sb.WriteString(styleSystem.Render(e.text) + "\n\n")
 		}
 	}
 	return sb.String()
@@ -486,14 +532,14 @@ func (m *Model) renderEntries() string {
 func (m *Model) renderStatusBar() string {
 	sess := orNone(m.appState.SessionID)
 	if len(sess) > 8 {
-		sess = sess[:8]
+		sess = sess[:8] + "…"
 	}
-	status := m.statusMsg
+	state := m.statusMsg
 	if m.agentRunning {
-		status = m.spinner.View() + " " + status
+		state = m.spinner.View() + " " + state
 	}
-	bar := fmt.Sprintf(" session:%s  model:%s  %s  %s ",
-		sess, m.appState.Model, m.appState.APIURL, status)
+	bar := fmt.Sprintf("  session:%-10s  model:%-14s  %s  %-16s",
+		sess, m.appState.Model, m.appState.APIURL, state)
 	return styleStatus.Width(m.width).Render(bar)
 }
 
@@ -503,22 +549,18 @@ func (m *Model) renderApproval() string {
 	}
 	var sb strings.Builder
 	sb.WriteString("⚠️  Approval Required\n\n")
-	sb.WriteString(fmt.Sprintf("Tool:   %s\n", m.approval.Tool))
-	if len(m.approval.Input) > 0 {
-		for k, v := range m.approval.Input {
-			sb.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
-		}
+	sb.WriteString(fmt.Sprintf("  Tool:   %s\n", m.approval.Tool))
+	for k, v := range m.approval.Input {
+		sb.WriteString(fmt.Sprintf("  %-8s %v\n", k+":", v))
 	}
-	sb.WriteString(fmt.Sprintf("Risk:   %s\n\n", m.approval.Risk))
+	sb.WriteString(fmt.Sprintf("\n  Risk: %s\n\n", m.approval.Risk))
 	sb.WriteString("  [y] Approve    [n] Reject\n")
-	return styleApproval.Width(60).Render(sb.String())
+	return styleApproval.Render(sb.String())
 }
 
-// ── Helpers ─────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────
 
-func (m *Model) pushEntry(e entry) {
-	m.entries = append(m.entries, e)
-}
+func (m *Model) pushEntry(e entry) { m.entries = append(m.entries, e) }
 
 func (m *Model) pushSystem(text string) {
 	m.entries = append(m.entries, entry{kind: entrySystem, text: text, ts: time.Now()})

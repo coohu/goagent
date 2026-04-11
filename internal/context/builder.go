@@ -8,7 +8,7 @@ import (
 	"github.com/coohu/goagent/internal/tools/registry"
 )
 
-const agentSystemPrompt = `You are an expert AI agent. You reason step by step, use tools precisely, and always stay focused on the user's goal. When you are ready to act, use exactly one tool call.`
+const agentSystemPrompt = `You are an expert AI software engineering agent. You reason step by step, use tools precisely, and always stay focused on the user's goal. When you are ready to act, use exactly one tool call.`
 
 type Builder struct {
 	memory    core.MemoryManager

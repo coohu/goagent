@@ -14,3 +14,4 @@ build/
 *.tar.bz2
 *.tar.xz
 .env
+go.sum
