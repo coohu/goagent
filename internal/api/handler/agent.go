@@ -2,11 +2,13 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/coohu/goagent/internal/agent"
 	"github.com/coohu/goagent/internal/api/sse"
 	"github.com/coohu/goagent/internal/core"
+	"github.com/coohu/goagent/internal/llm"
 	"github.com/gin-gonic/gin"
 )
 
@@ -14,10 +16,11 @@ type AgentHandler struct {
 	sessions *agent.SessionManager
 	runner   *agent.Runner
 	hub      *sse.Hub
+	router   *llm.Router
 }
 
-func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub) *AgentHandler {
-	return &AgentHandler{sessions: sessions, runner: runner, hub: hub}
+func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router) *AgentHandler {
+	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router}
 }
 
 type RunRequest struct {
@@ -189,11 +192,9 @@ func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	var patch struct {
-		MaxSteps      *int     `json:"max_steps"`
-		MaxRuntime    *string  `json:"max_runtime"`
-		PlannerModel  *string  `json:"planner_model"`
-		ExecutorModel *string  `json:"executor_model"`
-		AllowedTools  []string `json:"allowed_tools"`
+		MaxSteps     *int              `json:"max_steps"`
+		AllowedTools []string          `json:"allowed_tools"`
+		Models       *core.SceneModels `json:"models"`
 	}
 	if err := c.ShouldBindJSON(&patch); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -203,17 +204,34 @@ func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 	if patch.MaxSteps != nil {
 		session.Config.MaxSteps = *patch.MaxSteps
 	}
-	if patch.PlannerModel != nil {
-		session.Config.PlannerModel = *patch.PlannerModel
-	}
-	if patch.ExecutorModel != nil {
-		session.Config.ExecutorModel = *patch.ExecutorModel
-	}
 	if patch.AllowedTools != nil {
 		session.Config.AllowedTools = patch.AllowedTools
 	}
+	if patch.Models != nil {
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		m := patch.Models
+		if m.Planning != "" {
+			session.Config.Models.Planning = m.Planning
+			h.router.RegisterClient(m.Planning, llm.NewOpenAIClient(apiKey, "", m.Planning))
+		}
+		if m.Execute != "" {
+			session.Config.Models.Execute = m.Execute
+			h.router.RegisterClient(m.Execute, llm.NewOpenAIClient(apiKey, "", m.Execute))
+		}
+		if m.Summarize != "" {
+			session.Config.Models.Summarize = m.Summarize
+			h.router.RegisterClient(m.Summarize, llm.NewOpenAIClient(apiKey, "", m.Summarize))
+		}
+		if m.Reflect != "" {
+			session.Config.Models.Reflect = m.Reflect
+			h.router.RegisterClient(m.Reflect, llm.NewOpenAIClient(apiKey, "", m.Reflect))
+		}
+	}
 
-	c.JSON(http.StatusOK, gin.H{"config": session.Config})
+	c.JSON(http.StatusOK, gin.H{
+		"config": session.Config,
+		"models": session.Config.Models,
+	})
 }
 
 func (h *AgentHandler) ListSessions(c *gin.Context) {

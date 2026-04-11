@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// SceneModels stores the model ID to use for each LLM scene.
+// It mirrors llm.SceneConfig without importing the llm package.
+type SceneModels struct {
+	Planning  string `json:"planning"`
+	Execute   string `json:"execute"`
+	Summarize string `json:"summarize"`
+	Reflect   string `json:"reflect"`
+}
+
 type AgentConfig struct {
 	MaxSteps            int           `json:"max_steps"`
 	MaxRuntime          time.Duration `json:"max_runtime"`
@@ -13,10 +22,7 @@ type AgentConfig struct {
 	MaxToolCalls        int           `json:"max_tool_calls"`
 	MaxReplanCount      int           `json:"max_replan_count"`
 	MaxTokenBudget      int           `json:"max_token_budget"`
-	PlannerModel        string        `json:"planner_model"`
-	ExecutorModel       string        `json:"executor_model"`
-	SummaryModel        string        `json:"summary_model"`
-	ReflectModel        string        `json:"reflect_model"`
+	Models              SceneModels   `json:"models"`
 	AllowedTools        []string      `json:"allowed_tools"`
 	EnableBrowser       bool          `json:"enable_browser"`
 	EnableSandbox       bool          `json:"enable_sandbox"`
@@ -33,10 +39,12 @@ func DefaultConfig() *AgentConfig {
 		MaxToolCalls:        20,
 		MaxReplanCount:      5,
 		MaxTokenBudget:      200000,
-		PlannerModel:        "gpt-4o",
-		ExecutorModel:       "gpt-4o",
-		SummaryModel:        "gpt-4o-mini",
-		ReflectModel:        "gpt-4o-mini",
+		Models: SceneModels{
+			Planning:  "gpt-4o",
+			Execute:   "gpt-4o",
+			Summarize: "gpt-4o-mini",
+			Reflect:   "gpt-4o-mini",
+		},
 		EnableSandbox:       true,
 		ScratchpadMaxTokens: 20000,
 		ReActMaxTurns:       10,

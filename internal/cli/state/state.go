@@ -6,11 +6,32 @@ import (
 	"path/filepath"
 )
 
+// SceneModels mirrors core.SceneModels without importing server packages.
+type SceneModels struct {
+	Planning  string `json:"planning"`
+	Execute   string `json:"execute"`
+	Summarize string `json:"summarize"`
+	Reflect   string `json:"reflect"`
+}
+
+func (s *SceneModels) All() string {
+	return s.Planning
+}
+
+func DefaultModels() SceneModels {
+	return SceneModels{
+		Planning:  "gpt-4o",
+		Execute:   "gpt-4o",
+		Summarize: "gpt-4o-mini",
+		Reflect:   "gpt-4o-mini",
+	}
+}
+
 type State struct {
 	SessionID   string            `json:"session_id"`
 	APIURL      string            `json:"api_url"`
-	Model       string            `json:"model"`
-	FileMapping map[string]string `json:"file_mapping"` // local→remote
+	Models      SceneModels       `json:"models"`
+	FileMapping map[string]string `json:"file_mapping"`
 }
 
 func defaultPath() string {
@@ -21,7 +42,11 @@ func defaultPath() string {
 func Load() (*State, error) {
 	data, err := os.ReadFile(defaultPath())
 	if err != nil {
-		return &State{APIURL: "http://127.0.0.1:8080", Model: "gpt-4o", FileMapping: map[string]string{}}, nil
+		return &State{
+			APIURL:      "http://127.0.0.1:8080",
+			Models:      DefaultModels(),
+			FileMapping: map[string]string{},
+		}, nil
 	}
 	var s State
 	if err := json.Unmarshal(data, &s); err != nil {
@@ -29,6 +54,9 @@ func Load() (*State, error) {
 	}
 	if s.FileMapping == nil {
 		s.FileMapping = map[string]string{}
+	}
+	if s.Models.Planning == "" {
+		s.Models = DefaultModels()
 	}
 	return &s, nil
 }

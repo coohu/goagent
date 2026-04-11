@@ -1,6 +1,6 @@
 module github.com/coohu/goagent
 
-go 1.22
+go 1.25
 
 require (
 	github.com/charmbracelet/bubbles v0.18.0
@@ -11,6 +11,7 @@ require (
 	// Server deps
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.6.0
+	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
 	github.com/sashabaranov/go-openai v1.20.4
 	github.com/spf13/cobra v1.8.0
@@ -36,7 +37,6 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect

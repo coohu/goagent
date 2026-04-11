@@ -58,13 +58,13 @@ func run() error {
 		summarizeModel: llm.NewOpenAIClient(apiKey, baseUrl, summarizeModel),
 		reflectModel: llm.NewOpenAIClient(apiKey, baseUrl, reflectModel),
 	}
-	scenes := map[llm.Scene]string{
-		llm.ScenePlanning:  planModel,
-		llm.SceneExecute:   execModel,
-		llm.SceneSummarize: summarizeModel,
-		llm.SceneReflect:   reflectModel,
+	globalModels := core.SceneModels{
+		Planning:  planModel,
+		Execute:   execModel,
+		Summarize: summarizeModel,
+		Reflect:   reflectModel,
 	}
-	llmRouter := llm.NewRouter(llmClients, scenes)
+	llmRouter := llm.NewRouter(llmClients, globalModels)
 
 	reg := registry.New()
 	reg.Register(file.NewReadTool())
@@ -85,12 +85,9 @@ func run() error {
 	sessionMgr := agent.NewSessionManager(10)
 	hub := sse.NewHub()
 
-	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub)
+	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub, llmRouter)
 	fileHandler := handler.NewFileHandler(sessionMgr, workspaceRoot)
-	sysHandler := handler.NewSystemHandler(reg, "gpt-4o", []handler.ModelInfo{
-		{ID: "gpt-4o", Provider: "openai"},
-		{ID: "gpt-4o-mini", Provider: "openai"},
-	})
+	sysHandler := handler.NewSystemHandler(reg, llmRouter)
 
 	router := api.NewRouter(agentHandler, fileHandler, sysHandler)
 

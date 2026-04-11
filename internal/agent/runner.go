@@ -105,7 +105,7 @@ func (r *Runner) registerHandlers() {
 }
 
 func (r *Runner) handlePlanning(ctx context.Context, session *core.AgentSession, _ core.Event) ([]core.Event, error) {
-	plan, err := r.planner.CreatePlan(ctx, session.Goal, session.AgentCtx)
+	plan, err := r.planner.CreatePlan(ctx, session.Goal, session.AgentCtx, &session.Config.Models)
 	if err != nil {
 		return []core.Event{makeEvent(core.EventStepFailed, map[string]any{"error": err.Error()})}, nil
 	}
@@ -227,7 +227,7 @@ func (r *Runner) handleReplanning(ctx context.Context, session *core.AgentSessio
 	reason, _ := ev.Payload["reason"].(string)
 	session.IncrReplan()
 
-	newPlan, err := r.planner.Replan(ctx, session.Plan, reason, session.AgentCtx)
+	newPlan, err := r.planner.Replan(ctx, session.Plan, reason, session.AgentCtx, &session.Config.Models)
 	if err != nil {
 		return []core.Event{makeEvent(core.EventStepFailed, map[string]any{"error": err.Error()})}, nil
 	}

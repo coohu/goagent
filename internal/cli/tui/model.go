@@ -349,8 +349,7 @@ func (m *Model) sendGoal(goal string) tea.Cmd {
 		}
 		if sessionID == "" {
 			resp, err := m.client.Run(ctx, goal, map[string]any{
-				"planner_model":  m.appState.Model,
-				"executor_model": m.appState.Model,
+				"models": m.appState.Models,
 			})
 			if err != nil {
 				return errMsg{err}
@@ -410,33 +409,119 @@ func (m *Model) handleSessionCmd(args []string) tea.Cmd {
 	return nil
 }
 
+// handleModelCmd handles:
+//
+//	/model                           → show current scene config + available models
+//	/model <model_id>                → set ALL scenes to model_id
+//	/model plan|exec|sum|reflect <model_id> → set one scene
 func (m *Model) handleModelCmd(args []string) tea.Cmd {
 	if len(args) == 0 {
-		return func() tea.Msg {
-			models, err := m.client.ListModels(m.ctx)
-			if err != nil {
-				return errMsg{err}
-			}
-			var sb strings.Builder
-			for _, mod := range models {
-				mark := "  "
-				if mod.ID == m.appState.Model {
-					mark = "→ "
-				}
-				sb.WriteString(fmt.Sprintf("%s%s  (%s)\n", mark, mod.ID, mod.Provider))
-			}
-			return sseEventMsg{Type: "__system__", Payload: map[string]any{"text": sb.String()}}
+		return m.listModels()
+	}
+
+	// Two-arg form: /model <scene> <model_id>
+	if len(args) >= 2 {
+		scene := normalizeScene(args[0])
+		if scene != "" {
+			modelID := args[1]
+			m.applySceneModel(scene, modelID)
+			_ = m.appState.Save()
+			m.pushSystem(fmt.Sprintf("Model [%s] → %s", scene, modelID))
+			return m.syncModels()
 		}
 	}
-	m.appState.Model = args[0]
-	_ = m.appState.Save()
-	if m.appState.SessionID != "" {
-		go m.client.UpdateConfig(m.ctx, m.appState.SessionID, map[string]any{
-			"planner_model": args[0], "executor_model": args[0],
-		})
+
+	// One-arg form: /model <model_id>  → set all scenes
+	modelID := args[0]
+	m.appState.Models = state.SceneModels{
+		Planning:  modelID,
+		Execute:   modelID,
+		Summarize: modelID,
+		Reflect:   modelID,
 	}
-	m.pushSystem("Model → " + args[0])
-	return nil
+	_ = m.appState.Save()
+	m.pushSystem(fmt.Sprintf("All scenes → %s", modelID))
+	return m.syncModels()
+}
+
+// normalizeScene maps short aliases to canonical scene names.
+// Returns "" if the input is not a recognised scene keyword.
+func normalizeScene(s string) string {
+	switch strings.ToLower(s) {
+	case "plan", "planning":
+		return "planning"
+	case "exec", "execute":
+		return "execute"
+	case "sum", "summarize", "summary":
+		return "summarize"
+	case "reflect", "reflection":
+		return "reflect"
+	}
+	return ""
+}
+
+// applySceneModel updates one scene in the local state.
+func (m *Model) applySceneModel(scene, modelID string) {
+	switch scene {
+	case "planning":
+		m.appState.Models.Planning = modelID
+	case "execute":
+		m.appState.Models.Execute = modelID
+	case "summarize":
+		m.appState.Models.Summarize = modelID
+	case "reflect":
+		m.appState.Models.Reflect = modelID
+	}
+}
+
+// syncModels pushes the current SceneModels to the server (if a session is active).
+func (m *Model) syncModels() tea.Cmd {
+	if m.appState.SessionID == "" {
+		return nil
+	}
+	sessionID := m.appState.SessionID
+	models := m.appState.Models
+	return func() tea.Msg {
+		patch := apiclient.ConfigPatch{
+			Models: &apiclient.SceneModelPatch{
+				Planning:  models.Planning,
+				Execute:   models.Execute,
+				Summarize: models.Summarize,
+				Reflect:   models.Reflect,
+			},
+		}
+		if err := m.client.UpdateConfig(m.ctx, sessionID, patch); err != nil {
+			return errMsg{err}
+		}
+		return sseEventMsg{Type: "__system__", Payload: map[string]any{
+			"text": "Scene models synced to server.",
+		}}
+	}
+}
+
+// listModels fetches available models from the server and shows the current scene config.
+func (m *Model) listModels() tea.Cmd {
+	return func() tea.Msg {
+		models, err := m.client.ListModels(m.ctx)
+		if err != nil {
+			return errMsg{err}
+		}
+		cur := m.appState.Models
+		var sb strings.Builder
+		sb.WriteString("Current scene config:\n")
+		sb.WriteString(fmt.Sprintf("  plan     → %s\n", cur.Planning))
+		sb.WriteString(fmt.Sprintf("  exec     → %s\n", cur.Execute))
+		sb.WriteString(fmt.Sprintf("  sum      → %s\n", cur.Summarize))
+		sb.WriteString(fmt.Sprintf("  reflect  → %s\n\n", cur.Reflect))
+		sb.WriteString("Available models:\n")
+		for _, mod := range models {
+			sb.WriteString(fmt.Sprintf("  %s  (%s)\n", mod.ID, mod.Provider))
+		}
+		sb.WriteString("\nUsage:\n")
+		sb.WriteString("  /model <model_id>               set all scenes\n")
+		sb.WriteString("  /model plan|exec|sum|reflect <model_id>\n")
+		return sseEventMsg{Type: "__system__", Payload: map[string]any{"text": sb.String()}}
+	}
 }
 
 func (m *Model) handleUpload(args []string) tea.Cmd {
@@ -496,7 +581,21 @@ func (m *Model) handleConfig(args []string) tea.Cmd {
 	key, val := args[0], args[1]
 	sessionID := m.appState.SessionID
 	return func() tea.Msg {
-		if err := m.client.UpdateConfig(m.ctx, sessionID, map[string]any{key: val}); err != nil {
+		var patch apiclient.ConfigPatch
+		switch key {
+		case "max_steps":
+			n := 0
+			fmt.Sscanf(val, "%d", &n)
+			if n > 0 {
+				patch.MaxSteps = &n
+			}
+		case "allowed_tools":
+			patch.AllowedTools = strings.Split(val, ",")
+		default:
+			return sseEventMsg{Type: "__system__",
+				Payload: map[string]any{"text": fmt.Sprintf("Unknown config key %q. Supported: max_steps, allowed_tools", key)}}
+		}
+		if err := m.client.UpdateConfig(m.ctx, sessionID, patch); err != nil {
 			return errMsg{err}
 		}
 		return sseEventMsg{Type: "__system__",
@@ -513,7 +612,7 @@ func (m *Model) renderEntries() string {
 		case entryUser:
 			sb.WriteString(styleUser.Render("You") + "  " + e.text + "\n\n")
 		case entryThought:
-			sb.WriteString(styleThought.Render("  ↳ "+e.text) + "\n")
+			sb.WriteString(styleThought.Render("  ↳ " + e.text) + "\n")
 		case entryToolCall:
 			sb.WriteString(styleToolCall.Render("  ⚙  "+e.text) + "\n")
 		case entryToolResult:
@@ -539,7 +638,7 @@ func (m *Model) renderStatusBar() string {
 		state = m.spinner.View() + " " + state
 	}
 	bar := fmt.Sprintf("  session:%-10s  model:%-14s  %s  %-16s",
-		sess, m.appState.Model, m.appState.APIURL, state)
+		sess, m.appState.Models.Execute, m.appState.APIURL, state)
 	return styleStatus.Width(m.width).Render(bar)
 }
 
