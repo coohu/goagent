@@ -31,8 +31,6 @@ func main() {
 	err := godotenv.Load()
 	if err != nil {
 		slog.Error("Warning: 没有找到 .env 文件")
-	} else {
-		slog.Error("成功加载 .env 文件")
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
@@ -58,13 +56,13 @@ func run() error {
 		summarizeModel: llm.NewOpenAIClient(apiKey, baseUrl, summarizeModel),
 		reflectModel: llm.NewOpenAIClient(apiKey, baseUrl, reflectModel),
 	}
-	scenes := map[llm.Scene]string{
-		llm.ScenePlanning:  planModel,
-		llm.SceneExecute:   execModel,
-		llm.SceneSummarize: summarizeModel,
-		llm.SceneReflect:   reflectModel,
+	globalModels := core.SceneModels{
+		Planning:  planModel,
+		Execute:   execModel,
+		Summarize: summarizeModel,
+		Reflect:   reflectModel,
 	}
-	llmRouter := llm.NewRouter(llmClients, scenes)
+	llmRouter := llm.NewRouter(llmClients, globalModels)
 
 	reg := registry.New()
 	reg.Register(file.NewReadTool())
@@ -85,20 +83,17 @@ func run() error {
 	sessionMgr := agent.NewSessionManager(10)
 	hub := sse.NewHub()
 
-	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub)
+	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub, llmRouter, apiKey, baseUrl)
 	fileHandler := handler.NewFileHandler(sessionMgr, workspaceRoot)
-	sysHandler := handler.NewSystemHandler(reg, "gpt-4o", []handler.ModelInfo{
-		{ID: "gpt-4o", Provider: "openai"},
-		{ID: "gpt-4o-mini", Provider: "openai"},
-	})
+	sysHandler := handler.NewSystemHandler(reg, llmRouter)
 
 	router := api.NewRouter(agentHandler, fileHandler, sysHandler)
 
 	srv := &http.Server{
 		Addr:         ":" + envOr("PORT", "8080"),
 		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		ReadTimeout:  3000 * time.Second,
+		WriteTimeout: 6000 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)

@@ -77,6 +77,42 @@ func TestListSessions(t *testing.T) {
 	}
 }
 
+func TestUpdateConfigModels(t *testing.T) {
+	var receivedBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"config": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	err := c.UpdateConfig(context.Background(), "sess-123", ConfigPatch{
+		Models: &SceneModelPatch{
+			Planning:  "gpt-4o",
+			Execute:   "gpt-4o-mini",
+			Summarize: "gpt-4o-mini",
+			Reflect:   "qwen-plus",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody == nil {
+		t.Fatal("no body received")
+	}
+	models, ok := receivedBody["models"].(map[string]any)
+	if !ok {
+		t.Fatal("models field missing from request")
+	}
+	if models["reflect"] != "qwen-plus" {
+		t.Errorf("reflect model not sent correctly: %v", models["reflect"])
+	}
+}
+
 func TestAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

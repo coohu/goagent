@@ -50,6 +50,34 @@ func TestParseEmpty(t *testing.T) {
 	}
 }
 
+func TestParseModelCommands(t *testing.T) {
+	cases := []struct {
+		input     string
+		wantSlash string
+		wantArgs  []string
+	}{
+		{"/model", "model", []string{}},
+		{"/model gpt-4o", "model", []string{"gpt-4o"}},
+		{"/model plan gpt-4o", "model", []string{"plan", "gpt-4o"}},
+		{"/model exec gpt-4o-mini", "model", []string{"exec", "gpt-4o-mini"}},
+		{"/model sum qwen-plus", "model", []string{"sum", "qwen-plus"}},
+		{"/model reflect claude-3-5-haiku-20241022", "model", []string{"reflect", "claude-3-5-haiku-20241022"}},
+	}
+	for _, c := range cases {
+		cmd := Parse(c.input)
+		if cmd.Kind != KindSlash {
+			t.Errorf("%q: expected KindSlash", c.input)
+			continue
+		}
+		if cmd.Slash != c.wantSlash {
+			t.Errorf("%q: slash=%q, want %q", c.input, cmd.Slash, c.wantSlash)
+		}
+		if len(cmd.Args) != len(c.wantArgs) {
+			t.Errorf("%q: got %d args, want %d", c.input, len(cmd.Args), len(c.wantArgs))
+		}
+	}
+}
+
 func TestKnown(t *testing.T) {
 	known := []string{"model", "clear", "session", "help", "exit", "upload", "download", "config"}
 	for _, k := range known {

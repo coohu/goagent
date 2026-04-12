@@ -1,23 +1,28 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
+	"github.com/gin-gonic/gin"
 	"github.com/coohu/goagent/internal/agent"
 	"github.com/coohu/goagent/internal/api/sse"
 	"github.com/coohu/goagent/internal/core"
-	"github.com/gin-gonic/gin"
+	"github.com/coohu/goagent/internal/llm"
 )
 
 type AgentHandler struct {
 	sessions *agent.SessionManager
 	runner   *agent.Runner
 	hub      *sse.Hub
+	router   *llm.Router
+	apiKey   string
+	baseURL  string
 }
 
-func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub) *AgentHandler {
-	return &AgentHandler{sessions: sessions, runner: runner, hub: hub}
+func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router, apiKey, baseURL string) *AgentHandler {
+	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router, apiKey: apiKey, baseURL: baseURL}
 }
 
 type RunRequest struct {
@@ -48,8 +53,12 @@ func (h *AgentHandler) Run(c *gin.Context) {
 		return
 	}
 
+	// Auto-register any model IDs from the session config that are not yet
+	// known to the router. This supports OpenRouter, DeepSeek, local proxies, etc.
+	h.ensureModelsRegistered(session.Config.Models)
+
 	go func() {
-		_ = h.runner.Run(c.Request.Context(), session)
+		_ = h.runner.Run(context.Background(), session)
 	}()
 
 	c.JSON(http.StatusOK, RunResponse{
@@ -81,7 +90,7 @@ func (h *AgentHandler) Continue(c *gin.Context) {
 	session.AgentCtx.Scratchpad = &core.Scratchpad{MaxTokens: session.Config.ScratchpadMaxTokens}
 
 	go func() {
-		_ = h.runner.Run(c.Request.Context(), session)
+		_ = h.runner.Run(context.Background(), session)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -134,6 +143,7 @@ func (h *AgentHandler) Status(c *gin.Context) {
 		"goal":        session.Goal,
 		"plan":        session.Plan,
 		"metrics":     session.Metrics,
+		"config":      session.Config,
 		"created_at":  session.CreatedAt,
 		"updated_at":  session.UpdatedAt,
 		"finished_at": session.FinishedAt,
@@ -181,6 +191,19 @@ func (h *AgentHandler) Approve(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": status})
 }
 
+// ensureModelsRegistered registers any model IDs not yet known to the router,
+// using the handler's configured API key and base URL.
+func (h *AgentHandler) ensureModelsRegistered(models core.SceneModels) {
+	for _, modelID := range []string{models.Planning, models.Execute, models.Summarize, models.Reflect} {
+		if modelID == "" {
+			continue
+		}
+		h.router.RegisterClientIfAbsent(modelID, func() core.LLMClient {
+			return llm.NewOpenAIClient(h.apiKey, h.baseURL, modelID)
+		})
+	}
+}
+
 func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 	session, err := h.sessions.Get(c.Param("session_id"))
 	if err != nil {
@@ -189,11 +212,9 @@ func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	var patch struct {
-		MaxSteps      *int     `json:"max_steps"`
-		MaxRuntime    *string  `json:"max_runtime"`
-		PlannerModel  *string  `json:"planner_model"`
-		ExecutorModel *string  `json:"executor_model"`
-		AllowedTools  []string `json:"allowed_tools"`
+		MaxSteps     *int              `json:"max_steps"`
+		AllowedTools []string          `json:"allowed_tools"`
+		Models       *core.SceneModels `json:"models"`
 	}
 	if err := c.ShouldBindJSON(&patch); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -203,17 +224,30 @@ func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 	if patch.MaxSteps != nil {
 		session.Config.MaxSteps = *patch.MaxSteps
 	}
-	if patch.PlannerModel != nil {
-		session.Config.PlannerModel = *patch.PlannerModel
-	}
-	if patch.ExecutorModel != nil {
-		session.Config.ExecutorModel = *patch.ExecutorModel
-	}
 	if patch.AllowedTools != nil {
 		session.Config.AllowedTools = patch.AllowedTools
 	}
+	if patch.Models != nil {
+		m := patch.Models
+		if m.Planning != "" {
+			session.Config.Models.Planning = m.Planning
+		}
+		if m.Execute != "" {
+			session.Config.Models.Execute = m.Execute
+		}
+		if m.Summarize != "" {
+			session.Config.Models.Summarize = m.Summarize
+		}
+		if m.Reflect != "" {
+			session.Config.Models.Reflect = m.Reflect
+		}
+		h.ensureModelsRegistered(session.Config.Models)
+	}
 
-	c.JSON(http.StatusOK, gin.H{"config": session.Config})
+	c.JSON(http.StatusOK, gin.H{
+		"config": session.Config,
+		"models": session.Config.Models,
+	})
 }
 
 func (h *AgentHandler) ListSessions(c *gin.Context) {

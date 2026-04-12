@@ -20,20 +20,15 @@ func New(router *llm.Router) *Planner {
 	return &Planner{router: router}
 }
 
-func (p *Planner) CreatePlan(ctx context.Context, goal string, agentCtx *core.AgentContext) (*core.Plan, error) {
-	client, err := p.router.For(llm.ScenePlanning)
+func (p *Planner) CreatePlan(ctx context.Context, goal string, agentCtx *core.AgentContext, models *core.SceneModels) (*core.Plan, error) {
+	client, err := p.router.For(llm.ScenePlanning, models)
 	if err != nil {
 		return nil, err
 	}
 
-	tools := availableToolsDesc(agentCtx)
-	prompt := buildCreatePrompt(goal, tools)
-
+	prompt := buildCreatePrompt(goal, availableTools())
 	resp, err := client.ChatComplete(ctx, &core.ChatRequest{
-		Messages: []core.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
-		},
+		Messages:  []core.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}},
 		MaxTokens: 2000,
 	})
 	if err != nil {
@@ -57,8 +52,8 @@ func (p *Planner) CreatePlan(ctx context.Context, goal string, agentCtx *core.Ag
 	}, nil
 }
 
-func (p *Planner) Replan(ctx context.Context, plan *core.Plan, reason string, agentCtx *core.AgentContext) (*core.Plan, error) {
-	client, err := p.router.For(llm.ScenePlanning)
+func (p *Planner) Replan(ctx context.Context, plan *core.Plan, reason string, agentCtx *core.AgentContext, models *core.SceneModels) (*core.Plan, error) {
+	client, err := p.router.For(llm.ScenePlanning, models)
 	if err != nil {
 		return nil, err
 	}
@@ -67,10 +62,7 @@ func (p *Planner) Replan(ctx context.Context, plan *core.Plan, reason string, ag
 	prompt := buildReplanPrompt(plan.Goal, string(planJSON), plan.CurrentStep, reason)
 
 	resp, err := client.ChatComplete(ctx, &core.ChatRequest{
-		Messages: []core.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
-		},
+		Messages:  []core.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}},
 		MaxTokens: 2000,
 	})
 	if err != nil {
@@ -127,7 +119,7 @@ func parseSteps(content string) ([]core.Step, error) {
 	return steps, nil
 }
 
-func availableToolsDesc(agentCtx *core.AgentContext) string {
+func availableTools() string {
 	return "shell.exec, file.read, file.write, file.list, file.search, search.web, rag.search, http.request, git.clone, git.commit"
 }
 

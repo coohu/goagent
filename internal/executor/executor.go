@@ -26,8 +26,9 @@ func (e *Executor) ExecuteStep(ctx context.Context, session *core.AgentSession) 
 
 	step := session.Plan.Steps[session.Plan.CurrentStep]
 	schemas := e.registry.Schemas(session.Config.AllowedTools)
+	models := &session.Config.Models
 
-	client, err := e.router.For(llm.SceneExecute)
+	client, err := e.router.For(llm.SceneExecute, models)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +37,6 @@ func (e *Executor) ExecuteStep(ctx context.Context, session *core.AgentSession) 
 
 	for turn := 0; turn < session.Config.ReActMaxTurns; turn++ {
 		resp, err := client.ChatWithTools(ctx, &core.ChatRequest{
-			Model:     session.Config.ExecutorModel,
 			Messages:  messages,
 			MaxTokens: 2000,
 		}, schemas)
@@ -61,7 +61,6 @@ func (e *Executor) ExecuteStep(ctx context.Context, session *core.AgentSession) 
 			messages = append(messages, core.Message{Role: "assistant", Content: resp.Content})
 			appendScratchpad(session, turn, resp.Content, "", "")
 		}
-
 		if resp.FinishReason == "stop" {
 			break
 		}

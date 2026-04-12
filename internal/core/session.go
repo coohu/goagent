@@ -2,21 +2,55 @@ package core
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
 
+type Duration struct{ time.Duration }
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.String())
+}
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	// try string first: "10m", "30s", "1h30m"
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		dur, err := time.ParseDuration(s)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q: %w", s, err)
+		}
+		d.Duration = dur
+		return nil
+	}
+	// fall back to raw nanosecond integer
+	var ns int64
+	if err := json.Unmarshal(b, &ns); err != nil {
+		return err
+	}
+	d.Duration = time.Duration(ns)
+	return nil
+}
+
+// SceneModels stores the model ID to use for each LLM scene.
+// It mirrors llm.SceneConfig without importing the llm package.
+type SceneModels struct {
+	Planning  string `json:"planning"`
+	Execute   string `json:"execute"`
+	Summarize string `json:"summarize"`
+	Reflect   string `json:"reflect"`
+}
+
 type AgentConfig struct {
 	MaxSteps            int           `json:"max_steps"`
-	MaxRuntime          time.Duration `json:"max_runtime"`
+	MaxRuntime          Duration      `json:"max_runtime"`
 	MaxLLMCalls         int           `json:"max_llm_calls"`
 	MaxToolCalls        int           `json:"max_tool_calls"`
 	MaxReplanCount      int           `json:"max_replan_count"`
 	MaxTokenBudget      int           `json:"max_token_budget"`
-	PlannerModel        string        `json:"planner_model"`
-	ExecutorModel       string        `json:"executor_model"`
-	SummaryModel        string        `json:"summary_model"`
-	ReflectModel        string        `json:"reflect_model"`
+	Models              SceneModels   `json:"models"`
 	AllowedTools        []string      `json:"allowed_tools"`
 	EnableBrowser       bool          `json:"enable_browser"`
 	EnableSandbox       bool          `json:"enable_sandbox"`
@@ -28,15 +62,17 @@ type AgentConfig struct {
 func DefaultConfig() *AgentConfig {
 	return &AgentConfig{
 		MaxSteps:            30,
-		MaxRuntime:          10 * time.Minute,
+		MaxRuntime:          Duration{10 * time.Minute},
 		MaxLLMCalls:         30,
 		MaxToolCalls:        20,
 		MaxReplanCount:      5,
 		MaxTokenBudget:      200000,
-		PlannerModel:        "gpt-4o",
-		ExecutorModel:       "gpt-4o",
-		SummaryModel:        "gpt-4o-mini",
-		ReflectModel:        "gpt-4o-mini",
+		Models: SceneModels{
+			Planning:  "gpt-4o",
+			Execute:   "gpt-4o",
+			Summarize: "gpt-4o-mini",
+			Reflect:   "gpt-4o-mini",
+		},
 		EnableSandbox:       true,
 		ScratchpadMaxTokens: 20000,
 		ReActMaxTurns:       10,

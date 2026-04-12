@@ -7,15 +7,15 @@ import (
 type Kind int
 
 const (
-	KindGoal    Kind = iota // plain text → send to agent
-	KindSlash               // /command [args...]
+	KindGoal  Kind = iota
+	KindSlash
 )
 
 type Command struct {
-	Kind   Kind
-	Slash  string
-	Args   []string
-	Raw    string
+	Kind  Kind
+	Slash string
+	Args  []string
+	Raw   string
 }
 
 func Parse(input string) Command {
@@ -28,11 +28,9 @@ func Parse(input string) Command {
 	}
 	parts := strings.Fields(input)
 	slash := strings.TrimPrefix(parts[0], "/")
-	args := parts[1:]
-	return Command{Kind: KindSlash, Slash: slash, Args: args, Raw: input}
+	return Command{Kind: KindSlash, Slash: slash, Args: parts[1:], Raw: input}
 }
 
-// Known returns true for built-in slash commands
 func Known(slash string) bool {
 	switch slash {
 	case "model", "clear", "session", "help", "exit",
@@ -42,15 +40,32 @@ func Known(slash string) bool {
 	return false
 }
 
-// HelpText returns a short description for each command
 func HelpText() string {
 	return `Available commands:
-  /model [name]         View or switch the current LLM model
-  /clear                Reset the current reasoning context
-  /session [new|list|id] Switch or create a session
-  /upload <path>        Upload a local file to the agent workspace
-  /download <path>      Download a file from the agent workspace
-  /config <key> <val>   Adjust agent config (e.g. /config max_steps 50)
-  /help                 Show this help
-  /exit                 Exit the CLI`
+
+  /model                           Show scene→model config and available models
+  /model <model_id>                Set ALL scenes to the same model
+  /model plan|exec|sum|reflect <id>  Set one scene to a specific model
+
+    Scenes:
+      plan    → planner (creates the task plan)
+      exec    → executor (calls tools, runs ReAct loop)
+      sum     → summarizer (compresses tool output into memory)
+      reflect → reflector (evaluates step success)
+
+    Examples:
+      /model gpt-4o
+      /model exec gpt-4o-mini
+      /model reflect qwen-plus
+
+  /clear                           Reset context (keeps session, clears scratchpad)
+  /session                         Show current session ID
+  /session new                     Start a new session
+  /session list                    List all sessions on the server
+  /session <id>                    Switch to an existing session
+  /upload <path> [...]             Upload local file(s) to agent workspace
+  /download <remote> [local]       Download a file from agent workspace
+  /config <key> <value>            Adjust runtime config (e.g. /config max_steps 50)
+  /help                            Show this help
+  /exit                            Exit the CLI`
 }

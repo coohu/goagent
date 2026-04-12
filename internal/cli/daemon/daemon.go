@@ -19,7 +19,6 @@ func New(addr, binaryPath string) *Manager {
 	return &Manager{addr: addr, binaryPath: binaryPath}
 }
 
-// EnsureRunning checks if the server is reachable; if not, starts it.
 func (m *Manager) EnsureRunning(ctx context.Context) error {
 	if m.isAlive() {
 		return nil

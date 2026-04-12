@@ -73,7 +73,21 @@ func (c *Client) Approve(ctx context.Context, sessionID string, approved bool, c
 		map[string]any{"approved": approved, "comment": comment}, nil)
 }
 
-func (c *Client) UpdateConfig(ctx context.Context, sessionID string, patch map[string]any) error {
+// SceneModelPatch is the patch body for updating scene models on the server.
+type SceneModelPatch struct {
+	Planning  string `json:"planning,omitempty"`
+	Execute   string `json:"execute,omitempty"`
+	Summarize string `json:"summarize,omitempty"`
+	Reflect   string `json:"reflect,omitempty"`
+}
+
+type ConfigPatch struct {
+	MaxSteps     *int             `json:"max_steps,omitempty"`
+	AllowedTools []string         `json:"allowed_tools,omitempty"`
+	Models       *SceneModelPatch `json:"models,omitempty"`
+}
+
+func (c *Client) UpdateConfig(ctx context.Context, sessionID string, patch ConfigPatch) error {
 	return c.put(ctx, "/api/v1/agent/"+sessionID+"/config", patch, nil)
 }
 
