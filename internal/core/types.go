@@ -179,11 +179,11 @@ type Scratchpad struct {
 }
 
 type SessionMetrics struct {
-	StepCount      int
-	LLMCallCount   int
-	ToolCallCount  int
-	ReplanCount    int
-	TokensConsumed int
-	TotalCost      float64
-	StartTime      time.Time
+	StepCount      int       `json:"step_count"`
+	LLMCallCount   int       `json:"llm_call_count"`
+	ToolCallCount  int       `json:"tool_call_count"`
+	ReplanCount    int       `json:"replan_count"`
+	TokensConsumed int       `json:"tokens_consumed"`
+	TotalCost      float64   `json:"total_cost"`
+	StartTime      time.Time `json:"start_time"`
 }

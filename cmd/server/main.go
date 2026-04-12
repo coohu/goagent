@@ -92,8 +92,8 @@ func run() error {
 	srv := &http.Server{
 		Addr:         ":" + envOr("PORT", "8080"),
 		Handler:      router,
-		ReadTimeout:  3000 * time.Second,
-		WriteTimeout: 6000 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)

@@ -46,8 +46,11 @@ func (r *Runner) Run(parentCtx context.Context, session *core.AgentSession) erro
 
 	session.SetState(core.StateIdle)
 	queue := []core.Event{makeEvent(core.EventStart, nil)}
+
 	slog.Info("agent started", "session", session.ID, "goal", session.Goal)
+
 	for {
+		// Check wall-clock timeout first.
 		select {
 		case <-ctx.Done():
 			slog.Info("agent timeout", "session", session.ID)
@@ -96,6 +99,8 @@ func (r *Runner) Run(parentCtx context.Context, session *core.AgentSession) erro
 			r.broadcast(session, core.EventCostExceeded, map[string]any{"reason": reason})
 			return fmt.Errorf("limits exceeded: %s", reason)
 		}
+
+		// Broadcast the event to SSE listeners (UI/CLI).
 		r.broadcast(session, ev.Type, ev.Payload)
 
 		// Drive the FSM.
@@ -108,6 +113,7 @@ func (r *Runner) Run(parentCtx context.Context, session *core.AgentSession) erro
 
 		// Enqueue new events at the front so the state machine progresses immediately.
 		queue = append(newEvents, queue...)
+
 		st := session.GetState()
 		slog.Debug("state after transition", "session", session.ID, "state", st)
 
@@ -158,7 +164,11 @@ func (r *Runner) handleExecuting(ctx context.Context, session *core.AgentSession
 
 	step := &session.Plan.Steps[session.Plan.CurrentStep]
 	step.Status = core.StepRunning
-	session.AgentCtx.Scratchpad = &core.Scratchpad{MaxTokens: session.Config.ScratchpadMaxTokens}
+	scratchpadMax := session.Config.ScratchpadMaxTokens
+	if scratchpadMax <= 0 {
+		scratchpadMax = 20000
+	}
+	session.AgentCtx.Scratchpad = &core.Scratchpad{MaxTokens: scratchpadMax}
 
 	slog.Info("executing step", "session", session.ID, "step", step.Name, "tool", step.Tool)
 
