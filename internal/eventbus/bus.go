@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -91,6 +92,7 @@ func (b *Bus) Emit(ctx context.Context, ev core.Event) error {
 	}
 
 	b.dedup[ev.Hash] = time.Now()
+	slog.Debug("emit event-------", "type", ev.Type, "session", ev.SessionID, "hash", ev.Hash, "payload", ev.Payload)
 	heap.Push(&b.pq, &item{event: ev, priority: ev.Priority})
 
 	select {

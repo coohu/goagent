@@ -378,7 +378,7 @@ data: {"type":"done","result":"任务完成"}
 
 ---
 
-## 8. 项目目录结构（建议）
+## 8. 项目目录结构
 
 ```
 go-agent/
@@ -403,53 +403,3 @@ go-agent/
 ├── deployments/
 └── docs/
 ```
-
----
-
-## 9. 系统设计总结
-
-GoAgent 的核心思想可以总结为一句话：
-
-> **用 Event 驱动 FSM，用 FSM 驱动 Pipeline，用 Pipeline 驱动 LLM + Tools，用 Memory 让 Agent 变聪明。**
-
-系统关键设计：
-
-| 模块              | 作用        |
-| --------------- | --------- |
-| Event Bus       | 解耦        |
-| FSM             | 控制流程      |
-| Planner         | 任务拆解      |
-| Executor        | 执行        |
-| Tool            | 行动        |
-| Memory          | 记忆        |
-| Pipeline        | 数据处理      |
-| Context Builder | Prompt 构建 |
-| Reflection      | 自我修正      |
-
----
-
-## 10. 项目目标
-
-GoAgent 目标不是一个简单 AI 调用框架，而是一个：
-
-* 可执行复杂任务
-* 可长时间运行
-* 可控
-* 可观测
-* 可扩展
-* 可本地运行
-* 可接入工具生态（MCP）
-
-的 **工业级 Agent Runtime**。
-
----
-
-如果你愿意，下一步我可以帮你生成：
-
-* `ARCHITECTURE.md`
-* `CLI_DESIGN.md`
-* `FSM_DESIGN.md`
-* `EVENT_SYSTEM.md`
-* `ROADMAP.md`
-
-这些文档，把这个项目变成一个非常完整的工程设计文档体系。

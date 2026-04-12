@@ -1,15 +1,15 @@
 package handler
 
 import (
+	"context"
 	"net/http"
-	"os"
 	"strconv"
 
+	"github.com/gin-gonic/gin"
 	"github.com/coohu/goagent/internal/agent"
 	"github.com/coohu/goagent/internal/api/sse"
 	"github.com/coohu/goagent/internal/core"
 	"github.com/coohu/goagent/internal/llm"
-	"github.com/gin-gonic/gin"
 )
 
 type AgentHandler struct {
@@ -17,10 +17,12 @@ type AgentHandler struct {
 	runner   *agent.Runner
 	hub      *sse.Hub
 	router   *llm.Router
+	apiKey   string
+	baseURL  string
 }
 
-func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router) *AgentHandler {
-	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router}
+func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router, apiKey, baseURL string) *AgentHandler {
+	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router, apiKey: apiKey, baseURL: baseURL}
 }
 
 type RunRequest struct {
@@ -51,8 +53,12 @@ func (h *AgentHandler) Run(c *gin.Context) {
 		return
 	}
 
+	// Auto-register any model IDs from the session config that are not yet
+	// known to the router. This supports OpenRouter, DeepSeek, local proxies, etc.
+	h.ensureModelsRegistered(session.Config.Models)
+
 	go func() {
-		_ = h.runner.Run(c.Request.Context(), session)
+		_ = h.runner.Run(context.Background(), session)
 	}()
 
 	c.JSON(http.StatusOK, RunResponse{
@@ -84,7 +90,7 @@ func (h *AgentHandler) Continue(c *gin.Context) {
 	session.AgentCtx.Scratchpad = &core.Scratchpad{MaxTokens: session.Config.ScratchpadMaxTokens}
 
 	go func() {
-		_ = h.runner.Run(c.Request.Context(), session)
+		_ = h.runner.Run(context.Background(), session)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -137,6 +143,7 @@ func (h *AgentHandler) Status(c *gin.Context) {
 		"goal":        session.Goal,
 		"plan":        session.Plan,
 		"metrics":     session.Metrics,
+		"config":      session.Config,
 		"created_at":  session.CreatedAt,
 		"updated_at":  session.UpdatedAt,
 		"finished_at": session.FinishedAt,
@@ -184,6 +191,19 @@ func (h *AgentHandler) Approve(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": status})
 }
 
+// ensureModelsRegistered registers any model IDs not yet known to the router,
+// using the handler's configured API key and base URL.
+func (h *AgentHandler) ensureModelsRegistered(models core.SceneModels) {
+	for _, modelID := range []string{models.Planning, models.Execute, models.Summarize, models.Reflect} {
+		if modelID == "" {
+			continue
+		}
+		h.router.RegisterClientIfAbsent(modelID, func() core.LLMClient {
+			return llm.NewOpenAIClient(h.apiKey, h.baseURL, modelID)
+		})
+	}
+}
+
 func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 	session, err := h.sessions.Get(c.Param("session_id"))
 	if err != nil {
@@ -208,24 +228,20 @@ func (h *AgentHandler) UpdateConfig(c *gin.Context) {
 		session.Config.AllowedTools = patch.AllowedTools
 	}
 	if patch.Models != nil {
-		apiKey := os.Getenv("OPENAI_API_KEY")
 		m := patch.Models
 		if m.Planning != "" {
 			session.Config.Models.Planning = m.Planning
-			h.router.RegisterClient(m.Planning, llm.NewOpenAIClient(apiKey, "", m.Planning))
 		}
 		if m.Execute != "" {
 			session.Config.Models.Execute = m.Execute
-			h.router.RegisterClient(m.Execute, llm.NewOpenAIClient(apiKey, "", m.Execute))
 		}
 		if m.Summarize != "" {
 			session.Config.Models.Summarize = m.Summarize
-			h.router.RegisterClient(m.Summarize, llm.NewOpenAIClient(apiKey, "", m.Summarize))
 		}
 		if m.Reflect != "" {
 			session.Config.Models.Reflect = m.Reflect
-			h.router.RegisterClient(m.Reflect, llm.NewOpenAIClient(apiKey, "", m.Reflect))
 		}
+		h.ensureModelsRegistered(session.Config.Models)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

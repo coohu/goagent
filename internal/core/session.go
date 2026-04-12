@@ -2,9 +2,37 @@ package core
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
+
+type Duration struct{ time.Duration }
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.String())
+}
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	// try string first: "10m", "30s", "1h30m"
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		dur, err := time.ParseDuration(s)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q: %w", s, err)
+		}
+		d.Duration = dur
+		return nil
+	}
+	// fall back to raw nanosecond integer
+	var ns int64
+	if err := json.Unmarshal(b, &ns); err != nil {
+		return err
+	}
+	d.Duration = time.Duration(ns)
+	return nil
+}
 
 // SceneModels stores the model ID to use for each LLM scene.
 // It mirrors llm.SceneConfig without importing the llm package.
@@ -17,7 +45,7 @@ type SceneModels struct {
 
 type AgentConfig struct {
 	MaxSteps            int           `json:"max_steps"`
-	MaxRuntime          time.Duration `json:"max_runtime"`
+	MaxRuntime          Duration      `json:"max_runtime"`
 	MaxLLMCalls         int           `json:"max_llm_calls"`
 	MaxToolCalls        int           `json:"max_tool_calls"`
 	MaxReplanCount      int           `json:"max_replan_count"`
@@ -34,7 +62,7 @@ type AgentConfig struct {
 func DefaultConfig() *AgentConfig {
 	return &AgentConfig{
 		MaxSteps:            30,
-		MaxRuntime:          10 * time.Minute,
+		MaxRuntime:          Duration{10 * time.Minute},
 		MaxLLMCalls:         30,
 		MaxToolCalls:        20,
 		MaxReplanCount:      5,

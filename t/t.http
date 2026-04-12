@@ -12,7 +12,23 @@ POST http://localhost:8080/api/v1/agent/run
 Content-Type: application/json
 
 {
-    "goal": "仿照格林童话的风格，写一个关于勇敢的小兔子冒险的故事，要求情节曲折，有点黑暗。"
+    "goal": "仿照格林童话的风格，写一个关于勇敢的小兔子冒险的故事，要求情节曲折，有点黑暗。",
+    "config": {
+	    "max_steps": 10,
+	    "max_runtime": "20m",
+	    "max_llm_calls": 20,
+	    "max_tool_calls": 10,
+	    "max_replan_count": 3,
+	    "max_token_budget": 10000000,
+	    "models": {
+	        "planning": "nvidia/nemotron-3-super-120b-a12b:free",
+	        "execute": "nvidia/nemotron-3-super-120b-a12b:free",
+	        "summarize": "nvidia/nemotron-3-super-120b-a12b:free",
+	        "reflect": "nvidia/nemotron-3-super-120b-a12b:free"
+	    }
+    }
 }
 ####
 GET http://localhost:8080/api/v1/agent/f8c24e6f-a244-491c-b02c-b52f11e2006e/stream
+###
+GET  http://localhost:8080/api/v1/agent/fb258975-552b-4b3f-804f-b314adb63639/status

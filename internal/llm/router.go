@@ -59,14 +59,20 @@ func (r *Router) RegisterClient(modelID string, client core.LLMClient) {
 	r.clients[modelID] = client
 }
 
-// GlobalConfig returns the current server-level scene→model mapping.
+func (r *Router) RegisterClientIfAbsent(modelID string, factory func() core.LLMClient) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.clients[modelID]; !ok {
+		r.clients[modelID] = factory()
+	}
+}
+
 func (r *Router) GlobalConfig() core.SceneModels {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.global
 }
 
-// KnownModels returns IDs of all registered clients.
 func (r *Router) KnownModels() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

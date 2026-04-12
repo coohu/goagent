@@ -31,8 +31,6 @@ func main() {
 	err := godotenv.Load()
 	if err != nil {
 		slog.Error("Warning: 没有找到 .env 文件")
-	} else {
-		slog.Error("成功加载 .env 文件")
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
@@ -85,7 +83,7 @@ func run() error {
 	sessionMgr := agent.NewSessionManager(10)
 	hub := sse.NewHub()
 
-	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub, llmRouter)
+	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub, llmRouter, apiKey, baseUrl)
 	fileHandler := handler.NewFileHandler(sessionMgr, workspaceRoot)
 	sysHandler := handler.NewSystemHandler(reg, llmRouter)
 
@@ -94,8 +92,8 @@ func run() error {
 	srv := &http.Server{
 		Addr:         ":" + envOr("PORT", "8080"),
 		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		ReadTimeout:  3000 * time.Second,
+		WriteTimeout: 6000 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)
