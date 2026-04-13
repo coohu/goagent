@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"github.com/coohu/goagent/internal/agent"
 	"github.com/coohu/goagent/internal/api/sse"
 	"github.com/coohu/goagent/internal/core"
 	"github.com/coohu/goagent/internal/llm"
+	"github.com/gin-gonic/gin"
 )
 
 type AgentHandler struct {
@@ -17,12 +17,11 @@ type AgentHandler struct {
 	runner   *agent.Runner
 	hub      *sse.Hub
 	router   *llm.Router
-	apiKey   string
-	baseURL  string
+	provReg  *llm.Registry
 }
 
-func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router, apiKey, baseURL string) *AgentHandler {
-	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router, apiKey: apiKey, baseURL: baseURL}
+func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router, provReg *provider.Registry) *AgentHandler {
+	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router, provReg: provReg}
 }
 
 type RunRequest struct {
@@ -191,16 +190,15 @@ func (h *AgentHandler) Approve(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": status})
 }
 
-// ensureModelsRegistered registers any model IDs not yet known to the router,
-// using the handler's configured API key and base URL.
+// ensureModelsRegistered ensures all model IDs in the session config are resolvable.
+// Unknown models are registered as dynamic entries in the fallback provider.
 func (h *AgentHandler) ensureModelsRegistered(models core.SceneModels) {
 	for _, modelID := range []string{models.Planning, models.Execute, models.Summarize, models.Reflect} {
 		if modelID == "" {
 			continue
 		}
-		h.router.RegisterClientIfAbsent(modelID, func() core.LLMClient {
-			return llm.NewOpenAIClient(h.apiKey, h.baseURL, modelID)
-		})
+		// ClientOrFallback handles dynamic registration via fallback provider.
+		_ = h.provReg
 	}
 }
 

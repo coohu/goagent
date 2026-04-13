@@ -20,7 +20,7 @@ func (m *mockTool) Execute(_ context.Context, _ map[string]any) (*core.ToolResul
 }
 
 func TestRegisterAndGet(t *testing.T) {
-	r := New()
+	r := New("/tmp")
 	r.Register(&mockTool{"file.read"})
 
 	tool, err := r.Get("file.read")
@@ -33,7 +33,7 @@ func TestRegisterAndGet(t *testing.T) {
 }
 
 func TestGetNotFound(t *testing.T) {
-	r := New()
+	r := New("/tmp")
 	_, err := r.Get("nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent tool")
@@ -41,7 +41,7 @@ func TestGetNotFound(t *testing.T) {
 }
 
 func TestListAllowed(t *testing.T) {
-	r := New()
+	r := New("/tmp")
 	r.Register(&mockTool{"file.read"})
 	r.Register(&mockTool{"file.write"})
 	r.Register(&mockTool{"shell.exec"})
@@ -53,7 +53,7 @@ func TestListAllowed(t *testing.T) {
 }
 
 func TestListAllowedEmptyReturnsAll(t *testing.T) {
-	r := New()
+	r := New("/tmp")
 	r.Register(&mockTool{"file.read"})
 	r.Register(&mockTool{"file.write"})
 
@@ -64,7 +64,7 @@ func TestListAllowedEmptyReturnsAll(t *testing.T) {
 }
 
 func TestSchemas(t *testing.T) {
-	r := New()
+	r := New("/tmp")
 	r.Register(&mockTool{"file.read"})
 	r.Register(&mockTool{"shell.exec"})
 

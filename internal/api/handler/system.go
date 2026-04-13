@@ -18,24 +18,57 @@ func NewSystemHandler(reg *registry.Registry, router *llm.Router) *SystemHandler
 	return &SystemHandler{registry: reg, router: router}
 }
 
-type ModelInfo struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-}
-
 func (h *SystemHandler) ListModels(c *gin.Context) {
-	known := h.router.KnownModels()
+	models := h.router.KnownModels()
 	global := h.router.GlobalConfig()
 
-	models := make([]ModelInfo, 0, len(known))
-	for _, id := range known {
-		models = append(models, ModelInfo{ID: id, Provider: providerOf(id)})
+	type modelInfo struct {
+		ID            string           `json:"id"`
+		DisplayName   string           `json:"display_name"`
+		ProviderID    string           `json:"provider_id"`
+		Endpoints     []llm.Endpoint   `json:"endpoints"`
+		Capabilities  []llm.Capability `json:"capabilities"`
+		ContextWindow int              `json:"context_window,omitempty"`
+	}
+
+	result := make([]modelInfo, len(models))
+	for i, m := range models {
+		result[i] = modelInfo{
+			ID:            m.ID,
+			DisplayName:   m.Display(),
+			ProviderID:    m.ProviderID,
+			Endpoints:     m.Endpoints,
+			Capabilities:  m.Capabilities,
+			ContextWindow: m.ContextWindow,
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"models":       models,
+		"models":       result,
 		"scene_config": global,
 	})
+}
+
+func (h *SystemHandler) ListProviders(c *gin.Context) {
+	providers := h.router.Providers()
+
+	type providerInfo struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		BaseURL     string `json:"base_url"`
+		ModelCount  int    `json:"model_count"`
+	}
+
+	result := make([]providerInfo, len(providers))
+	for i, p := range providers {
+		result[i] = providerInfo{
+			ID:          p.ID,
+			DisplayName: p.DisplayName,
+			BaseURL:     p.BaseURL,
+			ModelCount:  len(p.Models),
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"providers": result})
 }
 
 func (h *SystemHandler) ListTools(c *gin.Context) {
@@ -50,17 +83,4 @@ func (h *SystemHandler) ListTools(c *gin.Context) {
 		result[i] = toolInfo{Name: t.Name(), Description: t.Description(), Schema: t.Schema()}
 	}
 	c.JSON(http.StatusOK, gin.H{"tools": result})
-}
-
-func providerOf(modelID string) string {
-	switch {
-	case len(modelID) >= 4 && modelID[:4] == "gpt-":
-		return "openai"
-	case len(modelID) >= 6 && modelID[:6] == "claude":
-		return "anthropic"
-	case len(modelID) >= 5 && modelID[:5] == "qwen-":
-		return "alibaba"
-	default:
-		return "unknown"
-	}
 }

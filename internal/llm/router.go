@@ -20,51 +20,32 @@ const (
 var _ core.LLMClient = (*Router)(nil)
 
 type Router struct {
-	mu      sync.RWMutex
-	clients map[string]core.LLMClient
-	global  core.SceneModels
+	mu               sync.RWMutex
+	registry         *provider.Registry
+	global           core.SceneModels
+	fallbackProvider string
 }
 
-func NewRouter(clients map[string]core.LLMClient, global core.SceneModels) *Router {
-	return &Router{clients: clients, global: global}
+func NewRouter(reg *provider.Registry, global core.SceneModels, fallbackProvider string) *Router {
+	return &Router{registry: reg, global: global, fallbackProvider: fallbackProvider}
 }
 
-// For resolves the LLM client for a scene.
-// If override is non-nil, its non-empty fields take precedence over global config.
 func (r *Router) For(scene Scene, override *core.SceneModels) (core.LLMClient, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	global := r.global
+	fb := r.fallbackProvider
+	r.mu.RUnlock()
 
-	model := r.modelForScene(scene, &r.global)
+	modelID := modelForScene(scene, &global)
 	if override != nil {
-		if m := r.modelForScene(scene, override); m != "" {
-			model = m
+		if m := modelForScene(scene, override); m != "" {
+			modelID = m
 		}
 	}
-
-	c, ok := r.clients[model]
-	if !ok {
-		for _, fallback := range r.clients {
-			return fallback, nil
-		}
-		return nil, fmt.Errorf("no LLM client for model %q", model)
+	if modelID == "" {
+		return nil, fmt.Errorf("no model configured for scene %q", scene)
 	}
-	return c, nil
-}
-
-// RegisterClient adds or updates a client at runtime.
-func (r *Router) RegisterClient(modelID string, client core.LLMClient) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.clients[modelID] = client
-}
-
-func (r *Router) RegisterClientIfAbsent(modelID string, factory func() core.LLMClient) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.clients[modelID]; !ok {
-		r.clients[modelID] = factory()
-	}
+	return r.registry.ClientOrFallback(modelID, fb)
 }
 
 func (r *Router) GlobalConfig() core.SceneModels {
@@ -73,34 +54,42 @@ func (r *Router) GlobalConfig() core.SceneModels {
 	return r.global
 }
 
-func (r *Router) KnownModels() []string {
+func (r *Router) KnownModels() []ModelDef {
+	return r.registry.KnownModels()
+}
+
+func (r *Router) Providers() []ProviderConfig {
+	return r.registry.Providers()
+}
+
+func (r *Router) RegisterProvider(cfg ProviderConfig) {
+	r.registry.RegisterProvider(cfg)
+}
+
+func (r *Router) RegisterClientIfAbsent(modelID string, factory func() core.LLMClient) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	ids := make([]string, 0, len(r.clients))
-	for id := range r.clients {
-		ids = append(ids, id)
+	fb := r.fallbackProvider
+	r.mu.RUnlock()
+	if _, err := r.registry.Client(modelID); err == nil {
+		return
 	}
-	return ids
-}
 
-func (r *Router) modelForScene(scene Scene, cfg *core.SceneModels) string {
-	if cfg == nil {
-		return ""
+	if fb != "" {
+		return
 	}
-	switch scene {
-	case ScenePlanning:
-		return cfg.Planning
-	case SceneExecute:
-		return cfg.Execute
-	case SceneSummarize:
-		return cfg.Summarize
-	case SceneReflect:
-		return cfg.Reflect
-	}
-	return cfg.Execute
-}
 
-// ── core.LLMClient passthrough (global config, no session override) ──
+	c := factory()
+	r.registry.RegisterProvider(ProviderConfig{
+		ID:      "synthetic-" + modelID,
+		BaseURL: "",
+		Models: []ModelDef{{
+			ID:         modelID,
+			ProviderID: "synthetic-" + modelID,
+			Endpoints:  []Endpoint{EndpointOpenAIChat},
+		}},
+	})
+	_ = c // factory result stored via cache in registry on next Client() call
+}
 
 func (r *Router) ChatComplete(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	c, err := r.For(SceneExecute, nil)
@@ -132,4 +121,21 @@ func (r *Router) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		return nil, err
 	}
 	return c.Embed(ctx, texts)
+}
+
+func modelForScene(scene Scene, cfg *core.SceneModels) string {
+	if cfg == nil {
+		return ""
+	}
+	switch scene {
+	case ScenePlanning:
+		return cfg.Planning
+	case SceneExecute:
+		return cfg.Execute
+	case SceneSummarize:
+		return cfg.Summarize
+	case SceneReflect:
+		return cfg.Reflect
+	}
+	return cfg.Execute
 }

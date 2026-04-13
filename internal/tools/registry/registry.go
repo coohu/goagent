@@ -1,9 +1,10 @@
 package registry
-
 import (
 	"fmt"
 	"sync"
-
+	"time"
+	"github.com/coohu/goagent/internal/tools/builtin/file"
+	fileshell "github.com/coohu/goagent/internal/tools/builtin/shell"
 	"github.com/coohu/goagent/internal/core"
 )
 
@@ -12,8 +13,15 @@ type Registry struct {
 	tools map[string]core.Tool
 }
 
-func New() *Registry {
-	return &Registry{tools: make(map[string]core.Tool)}
+func New(workspaceRoot string) *Registry {
+	reg := &Registry{tools: make(map[string]core.Tool)}
+	reg.Register(file.NewReadTool())
+	reg.Register(file.NewWriteTool())
+	reg.Register(file.NewListTool())
+	reg.Register(file.NewSearchTool())
+	reg.Register(fileshell.NewExecTool(60*time.Second, workspaceRoot))
+
+	return reg
 }
 
 func (r *Registry) Register(tool core.Tool) error {

@@ -28,6 +28,7 @@ func NewRouter(
 
 	v1.GET("/sessions", agentHandler.ListSessions)
 	v1.GET("/models", sysHandler.ListModels)
+	v1.GET("/providers", sysHandler.ListProviders)
 	v1.GET("/tools", sysHandler.ListTools)
 
 	files := v1.Group("/files")

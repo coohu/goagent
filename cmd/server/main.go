@@ -18,11 +18,9 @@ import (
 	"github.com/coohu/goagent/internal/eventbus"
 	"github.com/coohu/goagent/internal/executor"
 	"github.com/coohu/goagent/internal/fsm"
-	"github.com/coohu/goagent/internal/llm"
 	"github.com/coohu/goagent/internal/memory"
 	"github.com/coohu/goagent/internal/planner"
-	"github.com/coohu/goagent/internal/tools/builtin/file"
-	fileshell "github.com/coohu/goagent/internal/tools/builtin/shell"
+	"github.com/coohu/goagent/internal/llm"
 	"github.com/coohu/goagent/internal/tools/registry"
 	"github.com/joho/godotenv"
 )
@@ -39,59 +37,78 @@ func main() {
 }
 
 func run() error {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY not set")
-	}
-
 	workspaceRoot := envOr("WORKSPACE_ROOT", "/tmp/goagent/workspaces")
-	baseUrl := envOr("BASE_URL", "https://openrouter.ai/api/v1")
-	planModel := envOr("PLAN_MODEL", "gpt-4o")
-	execModel := envOr("EXEC_MODEL", "gpt-4o")
-	summarizeModel := envOr("SUMMARIZE_MODEL", "gpt-4o-mini")
-	reflectModel := envOr("REFLECT_MODEL", "gpt-4o-mini")
-	llmClients := map[string]core.LLMClient{
-		planModel:      llm.NewOpenAIClient(apiKey, baseUrl, planModel),
-		execModel:      llm.NewOpenAIClient(apiKey, baseUrl, execModel),
-		summarizeModel: llm.NewOpenAIClient(apiKey, baseUrl, summarizeModel),
-		reflectModel: llm.NewOpenAIClient(apiKey, baseUrl, reflectModel),
+	provReg := llm.NewRegistry()
+
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		provReg.RegisterProvider(llm.OpenAIProvider(key))
+		slog.Info("provider registered", "id", "openai")
 	}
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		provReg.RegisterProvider(llm.AnthropicProvider(key))
+		slog.Info("provider registered", "id", "anthropic")
+	}
+
+	llmKey := envOr("LLM_API_KEY", os.Getenv("OPENAI_API_KEY"))
+	llmBase := os.Getenv("LLM_BASE_URL")
+	fallbackProvider := ""
+	if llmKey != "" && llmBase != "" {
+		openrouterCfg := llm.ProviderConfig{
+			ID:          "openrouter",
+			DisplayName: "OpenRouter / Custom",
+			BaseURL:     llmBase,
+			APIKey:      llmKey,
+			Models:      []llm.ModelDef{}, // models resolved dynamically
+		}
+		provReg.RegisterProvider(openrouterCfg)
+		fallbackProvider = "openrouter"
+		slog.Info("provider registered", "id", "openrouter", "base_url", llmBase)
+	}
+
+	if ollamaModel := os.Getenv("OLLAMA_MODEL"); ollamaModel != "" {
+		ollamaURL := envOr("OLLAMA_URL", "http://localhost:11434")
+		provReg.RegisterProvider(llm.OllamaProvider(ollamaURL, ollamaModel))
+		slog.Info("provider registered", "id", "ollama", "model", ollamaModel)
+	}
+
+	if len(provReg.KnownModels()) == 0 && fallbackProvider == "" {
+		return fmt.Errorf("no LLM providers configured — set OPENAI_API_KEY, ANTHROPIC_API_KEY, or LLM_API_KEY+LLM_BASE_URL")
+	}
+
+	defaultModel := envOr("DEFAULT_MODEL", firstKnownModel(provReg, "gpt-4o"))
+	miniModel := envOr("DEFAULT_MINI_MODEL", firstKnownModel(provReg, "gpt-4o-mini"))
+
 	globalModels := core.SceneModels{
-		Planning:  planModel,
-		Execute:   execModel,
-		Summarize: summarizeModel,
-		Reflect:   reflectModel,
+		Planning:  defaultModel,
+		Execute:   defaultModel,
+		Summarize: miniModel,
+		Reflect:   miniModel,
 	}
-	llmRouter := llm.NewRouter(llmClients, globalModels)
+	slog.Info("default models", "planning", globalModels.Planning, "execute", globalModels.Execute,
+		"summarize", globalModels.Summarize, "reflect", globalModels.Reflect)
 
-	reg := registry.New()
-	reg.Register(file.NewReadTool())
-	reg.Register(file.NewWriteTool())
-	reg.Register(file.NewListTool())
-	reg.Register(file.NewSearchTool())
-	reg.Register(fileshell.NewExecTool(60*time.Second, workspaceRoot))
-
+	llmRouter := llm.NewRouter(provReg, globalModels, fallbackProvider)
+	toolReg := registry.New(workspaceRoot)
 	mem := memory.NewInMemoryManager()
 	bus := eventbus.New(eventbus.DefaultConfig())
 	fsmEngine := fsm.NewEngine()
 
 	pl := planner.New(llmRouter)
-	ex := executor.New(llmRouter, reg)
-	toolRunner := agent.NewDefaultToolRunner(reg)
+	ex := executor.New(llmRouter, toolReg)
+	toolRunner := agent.NewDefaultToolRunner(toolReg)
 	runner := agent.NewRunner(fsmEngine, bus, pl, ex, mem, toolRunner)
 
 	sessionMgr := agent.NewSessionManager(10)
 	hub := sse.NewHub()
 
-	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub, llmRouter, apiKey, baseUrl)
+	agentHandler := handler.NewAgentHandler(sessionMgr, runner, hub, llmRouter, provReg)
 	fileHandler := handler.NewFileHandler(sessionMgr, workspaceRoot)
-	sysHandler := handler.NewSystemHandler(reg, llmRouter)
-
-	router := api.NewRouter(agentHandler, fileHandler, sysHandler)
+	sysHandler := handler.NewSystemHandler(toolReg, llmRouter)
+	r := api.NewRouter(agentHandler, fileHandler, sysHandler)
 
 	srv := &http.Server{
 		Addr:         ":" + envOr("PORT", "8080"),
-		Handler:      router,
+		Handler:      r,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
@@ -108,7 +125,6 @@ func run() error {
 
 	<-quit
 	slog.Info("shutting down")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = bus.Shutdown(ctx)
@@ -120,4 +136,17 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func firstKnownModel(reg *llm.Registry, preferred string) string {
+	for _, m := range reg.KnownModels() {
+		if m.ID == preferred {
+			return preferred
+		}
+	}
+	models := reg.KnownModels()
+	if len(models) > 0 {
+		return models[0].ID
+	}
+	return preferred
 }
