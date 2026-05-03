@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-
 	"github.com/coohu/goagent/internal/core"
 )
 
@@ -21,12 +20,12 @@ var _ core.LLMClient = (*Router)(nil)
 
 type Router struct {
 	mu               sync.RWMutex
-	registry         *provider.Registry
+	registry         *Registry
 	global           core.SceneModels
 	fallbackProvider string
 }
 
-func NewRouter(reg *provider.Registry, global core.SceneModels, fallbackProvider string) *Router {
+func NewRouter(reg *Registry, global core.SceneModels, fallbackProvider string) *Router {
 	return &Router{registry: reg, global: global, fallbackProvider: fallbackProvider}
 }
 

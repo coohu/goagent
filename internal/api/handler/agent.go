@@ -20,7 +20,7 @@ type AgentHandler struct {
 	provReg  *llm.Registry
 }
 
-func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router, provReg *provider.Registry) *AgentHandler {
+func NewAgentHandler(sessions *agent.SessionManager, runner *agent.Runner, hub *sse.Hub, router *llm.Router, provReg *llm.Registry) *AgentHandler {
 	return &AgentHandler{sessions: sessions, runner: runner, hub: hub, router: router, provReg: provReg}
 }
 
@@ -51,9 +51,6 @@ func (h *AgentHandler) Run(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-
-	// Auto-register any model IDs from the session config that are not yet
-	// known to the router. This supports OpenRouter, DeepSeek, local proxies, etc.
 	h.ensureModelsRegistered(session.Config.Models)
 
 	go func() {

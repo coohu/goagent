@@ -5,24 +5,23 @@ import (
 	"sync"
 
 	"github.com/coohu/goagent/internal/core"
-	"github.com/coohu/goagent/internal/llm"
 	"github.com/coohu/goagent/internal/adapter"
 )
 
 type Registry struct {
 	mu        sync.RWMutex
-	providers map[string]llm.ProviderConfig
+	providers map[string]ProviderConfig
 	cache     map[string]core.LLMClient // modelID → client
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		providers: make(map[string]llm.ProviderConfig),
+		providers: make(map[string]ProviderConfig),
 		cache:     make(map[string]core.LLMClient),
 	}
 }
 
-func (r *Registry) RegisterProvider(cfg llm.ProviderConfig) {
+func (r *Registry) RegisterProvider(cfg ProviderConfig) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers[cfg.ID] = cfg
@@ -79,11 +78,11 @@ func (r *Registry) ClientOrFallback(modelID, fallbackProviderID string) (core.LL
 		return nil, fmt.Errorf("model %q not found and fallback provider %q not registered", modelID, fallbackProviderID)
 	}
 
-	model := llm.ModelDef{
+	model := ModelDef{
 		ID:           modelID,
 		ProviderID:   fallbackProviderID,
-		Endpoints:    []llm.Endpoint{llm.EndpointOpenAIChat},
-		Capabilities: []llm.Capability{llm.CapabilityTools, llm.CapabilityStreaming},
+		Endpoints:    []Endpoint{EndpointOpenAIChat},
+		Capabilities: []Capability{CapabilityTools, CapabilityStreaming},
 	}
 
 	adapters := buildAdapters(provCfg)
@@ -99,37 +98,37 @@ func (r *Registry) ClientOrFallback(modelID, fallbackProviderID string) (core.LL
 	return client, nil
 }
 
-func (r *Registry) KnownModels() []llm.ModelDef {
+func (r *Registry) KnownModels() []ModelDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var models []llm.ModelDef
+	var models []ModelDef
 	for _, p := range r.providers {
 		models = append(models, p.Models...)
 	}
 	return models
 }
 
-func (r *Registry) Providers() []llm.ProviderConfig {
+func (r *Registry) Providers() []ProviderConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]llm.ProviderConfig, 0, len(r.providers))
+	out := make([]ProviderConfig, 0, len(r.providers))
 	for _, p := range r.providers {
 		out = append(out, p)
 	}
 	return out
 }
 
-func (r *Registry) findModel(modelID string) (llm.ModelDef, llm.ProviderConfig, error) {
+func (r *Registry) findModel(modelID string) (ModelDef, ProviderConfig, error) {
 	for _, p := range r.providers {
 		m, err := p.FindModel(modelID)
 		if err == nil {
 			return m, p, nil
 		}
 	}
-	return llm.ModelDef{}, llm.ProviderConfig{}, fmt.Errorf("model %q not found in any registered provider", modelID)
+	return ModelDef{}, ProviderConfig{}, fmt.Errorf("model %q not found in any registered provider", modelID)
 }
 
-func buildAdapters(cfg llm.ProviderConfig) []adapter.Adapter {
+func buildAdapters(cfg ProviderConfig) []adapter.Adapter {
 	var adapters []adapter.Adapter
 	switch cfg.ID {
 	case "anthropic":

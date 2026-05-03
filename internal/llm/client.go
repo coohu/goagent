@@ -5,21 +5,20 @@ import (
 	"fmt"
 
 	"github.com/coohu/goagent/internal/core"
-	"github.com/coohu/goagent/internal/llm"
 	"github.com/coohu/goagent/internal/adapter"
 )
 
 type Client struct {
-	model   llm.ModelDef
+	model   ModelDef
 	adapter adapter.Adapter
 }
 
 var _ core.LLMClient = (*Client)(nil)
-func New(model llm.ModelDef, adapters []adapter.Adapter) (*Client, error) {
-	endpoints := make([]llm.Endpoint, len(adapters))
-	adapterMap := make(map[llm.Endpoint]adapter.Adapter, len(adapters))
+func New(model ModelDef, adapters []adapter.Adapter) (*Client, error) {
+	endpoints := make([]Endpoint, len(adapters))
+	adapterMap := make(map[Endpoint]adapter.Adapter, len(adapters))
 	for i, a := range adapters {
-		ep := llm.Endpoint(a.Endpoint())
+		ep := Endpoint(a.Endpoint())
 		endpoints[i] = ep
 		adapterMap[ep] = a
 	}
@@ -30,7 +29,7 @@ func New(model llm.ModelDef, adapters []adapter.Adapter) (*Client, error) {
 		if len(adapters) == 0 {
 			return nil, fmt.Errorf("no adapters available for model %q", model.ID)
 		}
-		preferred = llm.Endpoint(adapters[0].Endpoint())
+		preferred = Endpoint(adapters[0].Endpoint())
 	}
 
 	return &Client{model: model, adapter: adapterMap[preferred]}, nil
@@ -74,7 +73,7 @@ func (c *Client) Embed(_ context.Context, _ []string) ([][]float32, error) {
 	return nil, fmt.Errorf("model %q does not support embeddings via this adapter", c.model.ID)
 }
 
-func (c *Client) ModelDef() llm.ModelDef { return c.model }
+func (c *Client) ModelDef() ModelDef { return c.model }
 
 func coreToAdapterReq(req *core.ChatRequest, modelID string) *adapter.Request {
 	model := req.Model
